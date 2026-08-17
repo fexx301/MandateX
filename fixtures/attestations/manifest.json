@@ -1,0 +1,28 @@
+{
+  "generatedFrom": "fixtures/attestations/lib/build.mjs",
+  "contract": "tools/marketplace-core/EVALUATION_ATTESTATION_V2.md",
+  "deterministic": true,
+  "keyId": "fixture-insecure-do-not-deploy-1",
+  "publicKeyFingerprintSha256": "06e3fd8fda29bb60ab59557de61edb0aecdb231134be30e75b455f8e1b792fa9",
+  "timeAnchor": {
+    "issuedAt": 1786900000,
+    "evidenceObservedAt": 1786899970,
+    "quoteExpiresAt": 1786900600,
+    "maxClockSkewSeconds": 30
+  },
+  "counts": {
+    "valid": 5,
+    "invalid": 38,
+    "byAttackClass": {
+      "authority-escalation": 4,
+      "identity-confusion": 5,
+      "binding-failure": 4,
+      "signature": 5,
+      "time-rule": 6,
+      "freshness-forgery": 5,
+      "noncanonical-encoding": 6,
+      "resource-exhaustion": 1,
+      "malformed-input": 2
+    }
+  }
+}

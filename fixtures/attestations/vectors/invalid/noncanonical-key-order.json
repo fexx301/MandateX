@@ -1,0 +1,55 @@
+{
+  "name": "noncanonical-key-order",
+  "description": "Identical fields and values, keys in descending rather than ascending order.",
+  "attackClass": "noncanonical-encoding",
+  "expectedResult": "reject",
+  "expectedCode": "ATTESTATION_NONCANONICAL",
+  "evaluatedAt": 1786900000,
+  "maxClockSkewSeconds": 30,
+  "mandate": {
+    "schema": "mandatex.marketplace.mandate.v1",
+    "mandateId": "mandate-demo",
+    "category": "rebalancing",
+    "chainId": 56,
+    "createdAt": 1786899400,
+    "expiresAt": 1786903600,
+    "maxClockSkewSeconds": 30,
+    "maxEvidenceAgeSeconds": 300,
+    "maxPreviewAgeSeconds": 300,
+    "budgets": {
+      "maxAgentFeeUsdMicros": "0",
+      "maxGasUsdMicros": "50",
+      "maxSlippageBps": 50,
+      "maxExposureUsdMicros": "1000000"
+    },
+    "permissions": {
+      "allowedProtocols": [
+        "pancakeswap-v3"
+      ],
+      "allowedContracts": [
+        "0x4444444444444444444444444444444444444444"
+      ],
+      "allowedCalls": [
+        "decreaseLiquidity(uint256)"
+      ],
+      "maxSpendUsdMicros": "1000000",
+      "expiresAt": 1786903600
+    },
+    "rebalancing": {
+      "position": {
+        "protocol": "pancakeswap-v3",
+        "poolAddress": "0x3333333333333333333333333333333333333333",
+        "positionManagerAddress": "0x4444444444444444444444444444444444444444",
+        "tokenId": "7"
+      },
+      "approvedLowerTick": -100,
+      "approvedUpperTick": 100,
+      "targetWidthTicks": 100,
+      "triggerMode": "boundary_proximity",
+      "triggerDistanceTicks": 10
+    }
+  },
+  "wire": "{\"verifierPolicySha256\":\"2ce16c724b5e109338301048513e7f31a2216d69f7b01f47512d2c5f4ff7b2a8\",\"signatureProfile\":\"mandatex-ed25519-v1\",\"signature\":\"00134fe989514376097c908cf6f68ce0045696f1568be3b302794bf845cff9ebd7df49678106b572928019356bf181a11863fca5070c1a828958f6fa4694940d\",\"scope\":\"evaluation_only\",\"schema\":\"mandatex.marketplace.evaluation-attestation.v1\",\"reservation\":\"none\",\"replayPolicy\":\"reusable_until_expiry\",\"payloadSha256\":\"0f09366357506a1b312f6d35129e04f9d621295d7a43530d8ce6d3e8e25450a4\",\"payload\":{\"sourceCommitments\":{\"quoteValidationSha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"previewValidationSha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},\"quoteId\":\"quote-a\",\"mandateId\":\"mandate-demo\",\"category\":\"rebalancing\",\"candidate\":{\"chainId\":56,\"tokenId\":\"7\",\"owner\":\"0x1111111111111111111111111111111111111111\",\"publisher\":\"0x2222222222222222222222222222222222222222\",\"taskInterface\":\"erc8183\"},\"observedAt\":1786899970,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\",\"expiresAt\":1786900600,\"proposedAction\":\"Rebalance the bounded PancakeSwap V3 position.\",\"price\":{\"amountAtomic\":\"0\",\"currency\":\"0x5555555555555555555555555555555555555555\"},\"estimates\":{\"gasUsdMicros\":\"10\",\"slippageBps\":5,\"exposureUsdMicros\":\"100\",\"observedAt\":1786899970},\"permissions\":{\"contracts\":[\"0x4444444444444444444444444444444444444444\"],\"calls\":[\"decreaseLiquidity(uint256)\"],\"spendCapUsdMicros\":\"100\",\"expiresAt\":1786903600},\"verification\":{\"identity\":\"pass\",\"publisher\":\"pass\",\"endpoint\":\"pass\",\"taskInterface\":\"pass\",\"category\":\"pass\",\"quoteCompleteness\":\"pass\"},\"preview\":{\"status\":\"passed\",\"observedAt\":1786899970,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\"},\"reputation\":{\"scoreBps\":8700,\"sampleSize\":20,\"evidenceConfidenceBps\":9000,\"observedAt\":1786899970},\"categoryEvidence\":{\"category\":\"rebalancing\",\"protocol\":\"pancakeswap-v3\",\"position\":{\"poolAddress\":\"0x3333333333333333333333333333333333333333\",\"positionManagerAddress\":\"0x4444444444444444444444444444444444444444\",\"tokenId\":\"7\"},\"observedAt\":1786899970,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\",\"currentTick\":19,\"tickSpacing\":10,\"currentLowerTick\":-20,\"currentUpperTick\":20,\"proposedLowerTick\":-30,\"proposedUpperTick\":70,\"trigger\":{\"fired\":true,\"reason\":\"near_range_boundary\",\"distanceToBoundaryTicks\":1}}},\"mandateSha256\":\"26e57a3a53275fb2965d3ec059bc45af9ab10f44ff57a9f06485a2fb8f81a9bf\",\"keyId\":\"fixture-insecure-do-not-deploy-1\",\"issuer\":\"mandatex-agent-supply-verifier\",\"issuedAt\":1786900000,\"expiresAt\":1786900300,\"audience\":\"mandatex-marketplace-core\",\"attestationId\":\"018f4f5e-7d2d-7d6b-8fb8-35c1b79275a1\",\"activationAuthorization\":\"none\"}",
+  "wireSha256": "d460ba06c4a9fc1a71a09b6178a9126659bc8fefaef7d3c24b5e5603e6850b0c",
+  "wireByteLength": 2855
+}

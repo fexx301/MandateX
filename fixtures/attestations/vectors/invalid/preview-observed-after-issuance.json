@@ -1,0 +1,56 @@
+{
+  "name": "preview-observed-after-issuance",
+  "description": "Payload previewObservedAt is 60 seconds AFTER issuedAt.",
+  "attackClass": "freshness-forgery",
+  "expectedResult": "reject",
+  "expectedCode": "ATTESTATION_OBSERVATION_AFTER_ISSUANCE",
+  "evaluatedAt": 1786900000,
+  "maxClockSkewSeconds": 30,
+  "mandate": {
+    "schema": "mandatex.marketplace.mandate.v1",
+    "mandateId": "mandate-demo",
+    "category": "rebalancing",
+    "chainId": 56,
+    "createdAt": 1786899400,
+    "expiresAt": 1786903600,
+    "maxClockSkewSeconds": 30,
+    "maxEvidenceAgeSeconds": 300,
+    "maxPreviewAgeSeconds": 300,
+    "budgets": {
+      "maxAgentFeeUsdMicros": "0",
+      "maxGasUsdMicros": "50",
+      "maxSlippageBps": 50,
+      "maxExposureUsdMicros": "1000000"
+    },
+    "permissions": {
+      "allowedProtocols": [
+        "pancakeswap-v3"
+      ],
+      "allowedContracts": [
+        "0x4444444444444444444444444444444444444444"
+      ],
+      "allowedCalls": [
+        "decreaseLiquidity(uint256)"
+      ],
+      "maxSpendUsdMicros": "1000000",
+      "expiresAt": 1786903600
+    },
+    "rebalancing": {
+      "position": {
+        "protocol": "pancakeswap-v3",
+        "poolAddress": "0x3333333333333333333333333333333333333333",
+        "positionManagerAddress": "0x4444444444444444444444444444444444444444",
+        "tokenId": "7"
+      },
+      "approvedLowerTick": -100,
+      "approvedUpperTick": 100,
+      "targetWidthTicks": 100,
+      "triggerMode": "boundary_proximity",
+      "triggerDistanceTicks": 10
+    }
+  },
+  "wire": "{\"activationAuthorization\":\"none\",\"attestationId\":\"018f4f5e-7d2d-7d6b-8fb8-35c1b79275a1\",\"audience\":\"mandatex-marketplace-core\",\"expiresAt\":1786900300,\"issuedAt\":1786900000,\"issuer\":\"mandatex-agent-supply-verifier\",\"keyId\":\"fixture-insecure-do-not-deploy-1\",\"mandateSha256\":\"26e57a3a53275fb2965d3ec059bc45af9ab10f44ff57a9f06485a2fb8f81a9bf\",\"payload\":{\"candidate\":{\"chainId\":56,\"owner\":\"0x1111111111111111111111111111111111111111\",\"publisher\":\"0x2222222222222222222222222222222222222222\",\"taskInterface\":\"erc8183\",\"tokenId\":\"7\"},\"category\":\"rebalancing\",\"categoryEvidence\":{\"category\":\"rebalancing\",\"currentLowerTick\":-20,\"currentTick\":19,\"currentUpperTick\":20,\"observedAt\":1786899970,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\",\"position\":{\"poolAddress\":\"0x3333333333333333333333333333333333333333\",\"positionManagerAddress\":\"0x4444444444444444444444444444444444444444\",\"tokenId\":\"7\"},\"proposedLowerTick\":-30,\"proposedUpperTick\":70,\"protocol\":\"pancakeswap-v3\",\"tickSpacing\":10,\"trigger\":{\"distanceToBoundaryTicks\":1,\"fired\":true,\"reason\":\"near_range_boundary\"}},\"estimates\":{\"exposureUsdMicros\":\"100\",\"gasUsdMicros\":\"10\",\"observedAt\":1786899970,\"slippageBps\":5},\"expiresAt\":1786900600,\"mandateId\":\"mandate-demo\",\"observedAt\":1786899970,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\",\"permissions\":{\"calls\":[\"decreaseLiquidity(uint256)\"],\"contracts\":[\"0x4444444444444444444444444444444444444444\"],\"expiresAt\":1786903600,\"spendCapUsdMicros\":\"100\"},\"preview\":{\"observedAt\":1786900060,\"observedBlock\":123,\"observedBlockHash\":\"0xabababababababababababababababababababababababababababababababab\",\"status\":\"passed\"},\"price\":{\"amountAtomic\":\"0\",\"currency\":\"0x5555555555555555555555555555555555555555\"},\"proposedAction\":\"Rebalance the bounded PancakeSwap V3 position.\",\"quoteId\":\"quote-a\",\"reputation\":{\"evidenceConfidenceBps\":9000,\"observedAt\":1786899970,\"sampleSize\":20,\"scoreBps\":8700},\"sourceCommitments\":{\"previewValidationSha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"quoteValidationSha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"verification\":{\"category\":\"pass\",\"endpoint\":\"pass\",\"identity\":\"pass\",\"publisher\":\"pass\",\"quoteCompleteness\":\"pass\",\"taskInterface\":\"pass\"}},\"payloadSha256\":\"dec43a4beed31fad9d13de38582a45628df05ed2bbae629ffcfc3489baabfa83\",\"replayPolicy\":\"reusable_until_expiry\",\"reservation\":\"none\",\"schema\":\"mandatex.marketplace.evaluation-attestation.v1\",\"scope\":\"evaluation_only\",\"signature\":\"66577c271d2de6a1f930462ede707d791beedd1188f5b421035e37567fad43a8edc00ee8e443c7a6f058b0d1c604ba84373113ead304cf7169febb1f333d5307\",\"signatureProfile\":\"mandatex-ed25519-v1\",\"verifierPolicySha256\":\"2ce16c724b5e109338301048513e7f31a2216d69f7b01f47512d2c5f4ff7b2a8\"}",
+  "wireSha256": "7a0ec18f5c6e963c4ab90bd32cfdf8b2cba6d0ee3231b894b9197be9e5161760",
+  "wireByteLength": 2855,
+  "notes": "Freshness is a scored ranking input, so future-dated evidence is a ranking attack, not merely a bookkeeping error."
+}

@@ -1,0 +1,41 @@
+{
+  "purpose": "Locks the exact signing bytes required by EVALUATION_ATTESTATION_V2.md before the real signer service is deployed. Produced by an INDEPENDENT canonicalizer (lib/canonical.mjs), not by marketplace-core. Any signer implementation, in any language, must reproduce these digests exactly or its signatures will be rejected.",
+  "signingDomain": "MandateX Marketplace Evaluation Attestation v1\u0000",
+  "signingDomainHex": "4d616e6461746558204d61726b6574706c616365204576616c756174696f6e204174746573746174696f6e20763100",
+  "construction": "ed25519(privateKey, utf8(signingDomain) || utf8(canonicalJson(unsignedEnvelope)))",
+  "keyId": "fixture-insecure-do-not-deploy-1",
+  "publicKeyFingerprintSha256": "06e3fd8fda29bb60ab59557de61edb0aecdb231134be30e75b455f8e1b792fa9",
+  "mandateSha256": "26e57a3a53275fb2965d3ec059bc45af9ab10f44ff57a9f06485a2fb8f81a9bf",
+  "vectors": [
+    {
+      "name": "baseline",
+      "signingMessageSha256": "ddf0e2704ec0ae562494a1e70550148bd818f4e7176af1de020d6ff021a2ba4b",
+      "signingMessageByteLength": 2759,
+      "signatureHex": "00134fe989514376097c908cf6f68ce0045696f1568be3b302794bf845cff9ebd7df49678106b572928019356bf181a11863fca5070c1a828958f6fa4694940d"
+    },
+    {
+      "name": "competing-quote-b",
+      "signingMessageSha256": "749d0089bc0a90df407a412365654da9d071407eb5d46b3d0478208b9b0313d5",
+      "signingMessageByteLength": 2760,
+      "signatureHex": "3151919631d68063e7c1ae5c4075b8c3686e3dac4c1fe639375fcfa255350bf0c6ad8aaaf96341cd74acd38f978e9cd1e8925547afa4829ae84c2e274318820f"
+    },
+    {
+      "name": "competing-quote-c-older-evidence",
+      "signingMessageSha256": "6a55e3f4fa270e9da5b4663071d94d3f1d924e60dd9811c6cd84c0969f2c806a",
+      "signingMessageByteLength": 2759,
+      "signatureHex": "7eedd66e291de80db65c4285d127c2340ea4002bbd09a0dc2dacd75ff1624ca3e8c45b2975632ab5e81a3bcc3ccf21c0339c60e39ccd8ec7d69bcb2b228d6003"
+    },
+    {
+      "name": "boundary-min-ttl",
+      "signingMessageSha256": "0daf6727c9b4742a1c8c13d8ff215fc0538988c0847df9c5cee1bb70ddcf14d3",
+      "signingMessageByteLength": 2759,
+      "signatureHex": "f305f83867a8d9857d1290c32e66b2a5b905200ae11cf749c7453025bdeb563e9ae9e0fdef46fcdd67edea183e4a16421574d29ad2f93e5725fa973fe823de07"
+    },
+    {
+      "name": "boundary-max-ttl",
+      "signingMessageSha256": "ddf0e2704ec0ae562494a1e70550148bd818f4e7176af1de020d6ff021a2ba4b",
+      "signingMessageByteLength": 2759,
+      "signatureHex": "00134fe989514376097c908cf6f68ce0045696f1568be3b302794bf845cff9ebd7df49678106b572928019356bf181a11863fca5070c1a828958f6fa4694940d"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "noncanonical-pretty-printed",
+  "description": "Indented human-readable JSON with identical semantic content.",
+  "attackClass": "noncanonical-encoding",
+  "expectedResult": "reject",
+  "expectedCode": "ATTESTATION_NONCANONICAL",
+  "evaluatedAt": 1786900000,
+  "maxClockSkewSeconds": 30,
+  "mandate": {
+    "schema": "mandatex.marketplace.mandate.v1",
+    "mandateId": "mandate-demo",
+    "category": "rebalancing",
+    "chainId": 56,
+    "createdAt": 1786899400,
+    "expiresAt": 1786903600,
+    "maxClockSkewSeconds": 30,
+    "maxEvidenceAgeSeconds": 300,
+    "maxPreviewAgeSeconds": 300,
+    "budgets": {
+      "maxAgentFeeUsdMicros": "0",
+      "maxGasUsdMicros": "50",
+      "maxSlippageBps": 50,
+      "maxExposureUsdMicros": "1000000"
+    },
+    "permissions": {
+      "allowedProtocols": [
+        "pancakeswap-v3"
+      ],
+      "allowedContracts": [
+        "0x4444444444444444444444444444444444444444"
+      ],
+      "allowedCalls": [
+        "decreaseLiquidity(uint256)"
+      ],
+      "maxSpendUsdMicros": "1000000",
+      "expiresAt": 1786903600
+    },
+    "rebalancing": {
+      "position": {
+        "protocol": "pancakeswap-v3",
+        "poolAddress": "0x3333333333333333333333333333333333333333",
+        "positionManagerAddress": "0x4444444444444444444444444444444444444444",
+        "tokenId": "7"
+      },
+      "approvedLowerTick": -100,
+      "approvedUpperTick": 100,
+      "targetWidthTicks": 100,
+      "triggerMode": "boundary_proximity",
+      "triggerDistanceTicks": 10
+    }
+  },
+  "wire": "{\n  \"activationAuthorization\": \"none\",\n  \"attestationId\": \"018f4f5e-7d2d-7d6b-8fb8-35c1b79275a1\",\n  \"audience\": \"mandatex-marketplace-core\",\n  \"expiresAt\": 1786900300,\n  \"issuedAt\": 1786900000,\n  \"issuer\": \"mandatex-agent-supply-verifier\",\n  \"keyId\": \"fixture-insecure-do-not-deploy-1\",\n  \"mandateSha256\": \"26e57a3a53275fb2965d3ec059bc45af9ab10f44ff57a9f06485a2fb8f81a9bf\",\n  \"payload\": {\n    \"candidate\": {\n      \"chainId\": 56,\n      \"owner\": \"0x1111111111111111111111111111111111111111\",\n      \"publisher\": \"0x2222222222222222222222222222222222222222\",\n      \"taskInterface\": \"erc8183\",\n      \"tokenId\": \"7\"\n    },\n    \"category\": \"rebalancing\",\n    \"categoryEvidence\": {\n      \"category\": \"rebalancing\",\n      \"currentLowerTick\": -20,\n      \"currentTick\": 19,\n      \"currentUpperTick\": 20,\n      \"observedAt\": 1786899970,\n      \"observedBlock\": 123,\n      \"observedBlockHash\": \"0xabababababababababababababababababababababababababababababababab\",\n      \"position\": {\n        \"poolAddress\": \"0x3333333333333333333333333333333333333333\",\n        \"positionManagerAddress\": \"0x4444444444444444444444444444444444444444\",\n        \"tokenId\": \"7\"\n      },\n      \"proposedLowerTick\": -30,\n      \"proposedUpperTick\": 70,\n      \"protocol\": \"pancakeswap-v3\",\n      \"tickSpacing\": 10,\n      \"trigger\": {\n        \"distanceToBoundaryTicks\": 1,\n        \"fired\": true,\n        \"reason\": \"near_range_boundary\"\n      }\n    },\n    \"estimates\": {\n      \"exposureUsdMicros\": \"100\",\n      \"gasUsdMicros\": \"10\",\n      \"observedAt\": 1786899970,\n      \"slippageBps\": 5\n    },\n    \"expiresAt\": 1786900600,\n    \"mandateId\": \"mandate-demo\",\n    \"observedAt\": 1786899970,\n    \"observedBlock\": 123,\n    \"observedBlockHash\": \"0xabababababababababababababababababababababababababababababababab\",\n    \"permissions\": {\n      \"calls\": [\n        \"decreaseLiquidity(uint256)\"\n      ],\n      \"contracts\": [\n        \"0x4444444444444444444444444444444444444444\"\n      ],\n      \"expiresAt\": 1786903600,\n      \"spendCapUsdMicros\": \"100\"\n    },\n    \"preview\": {\n      \"observedAt\": 1786899970,\n      \"observedBlock\": 123,\n      \"observedBlockHash\": \"0xabababababababababababababababababababababababababababababababab\",\n      \"status\": \"passed\"\n    },\n    \"price\": {\n      \"amountAtomic\": \"0\",\n      \"currency\": \"0x5555555555555555555555555555555555555555\"\n    },\n    \"proposedAction\": \"Rebalance the bounded PancakeSwap V3 position.\",\n    \"quoteId\": \"quote-a\",\n    \"reputation\": {\n      \"evidenceConfidenceBps\": 9000,\n      \"observedAt\": 1786899970,\n      \"sampleSize\": 20,\n      \"scoreBps\": 8700\n    },\n    \"sourceCommitments\": {\n      \"previewValidationSha256\": \"2222222222222222222222222222222222222222222222222222222222222222\",\n      \"quoteValidationSha256\": \"1111111111111111111111111111111111111111111111111111111111111111\"\n    },\n    \"verification\": {\n      \"category\": \"pass\",\n      \"endpoint\": \"pass\",\n      \"identity\": \"pass\",\n      \"publisher\": \"pass\",\n      \"quoteCompleteness\": \"pass\",\n      \"taskInterface\": \"pass\"\n    }\n  },\n  \"payloadSha256\": \"0f09366357506a1b312f6d35129e04f9d621295d7a43530d8ce6d3e8e25450a4\",\n  \"replayPolicy\": \"reusable_until_expiry\",\n  \"reservation\": \"none\",\n  \"schema\": \"mandatex.marketplace.evaluation-attestation.v1\",\n  \"scope\": \"evaluation_only\",\n  \"signature\": \"00134fe989514376097c908cf6f68ce0045696f1568be3b302794bf845cff9ebd7df49678106b572928019356bf181a11863fca5070c1a828958f6fa4694940d\",\n  \"signatureProfile\": \"mandatex-ed25519-v1\",\n  \"verifierPolicySha256\": \"2ce16c724b5e109338301048513e7f31a2216d69f7b01f47512d2c5f4ff7b2a8\"\n}",
+  "wireSha256": "e47e52d52ee6862fda8da1cecf85d339a3832cd2e5cb6c89664475a265aa94ee",
+  "wireByteLength": 3532
+}

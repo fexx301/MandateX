@@ -1,0 +1,55 @@
+{
+  "name": "not-json",
+  "description": "Plain text that is not JSON at all.",
+  "attackClass": "malformed-input",
+  "expectedResult": "reject",
+  "expectedCode": "ATTESTATION_JSON_INVALID",
+  "evaluatedAt": 1786900000,
+  "maxClockSkewSeconds": 30,
+  "mandate": {
+    "schema": "mandatex.marketplace.mandate.v1",
+    "mandateId": "mandate-demo",
+    "category": "rebalancing",
+    "chainId": 56,
+    "createdAt": 1786899400,
+    "expiresAt": 1786903600,
+    "maxClockSkewSeconds": 30,
+    "maxEvidenceAgeSeconds": 300,
+    "maxPreviewAgeSeconds": 300,
+    "budgets": {
+      "maxAgentFeeUsdMicros": "0",
+      "maxGasUsdMicros": "50",
+      "maxSlippageBps": 50,
+      "maxExposureUsdMicros": "1000000"
+    },
+    "permissions": {
+      "allowedProtocols": [
+        "pancakeswap-v3"
+      ],
+      "allowedContracts": [
+        "0x4444444444444444444444444444444444444444"
+      ],
+      "allowedCalls": [
+        "decreaseLiquidity(uint256)"
+      ],
+      "maxSpendUsdMicros": "1000000",
+      "expiresAt": 1786903600
+    },
+    "rebalancing": {
+      "position": {
+        "protocol": "pancakeswap-v3",
+        "poolAddress": "0x3333333333333333333333333333333333333333",
+        "positionManagerAddress": "0x4444444444444444444444444444444444444444",
+        "tokenId": "7"
+      },
+      "approvedLowerTick": -100,
+      "approvedUpperTick": 100,
+      "targetWidthTicks": 100,
+      "triggerMode": "boundary_proximity",
+      "triggerDistanceTicks": 10
+    }
+  },
+  "wire": "this is not an attestation",
+  "wireSha256": "0b1dd5da704bed19a305246be4e8d7930985c3b73786d2f8eae50deb9df69a70",
+  "wireByteLength": 26
+}
