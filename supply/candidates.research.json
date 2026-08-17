@@ -1,0 +1,245 @@
+{
+  "_comment": [
+    "Research output for plan.md section 3 item 6. Researched 2026-08-17.",
+    "Findings and verdict: supply/README.md.",
+    "",
+    "`candidates` entries use EXACTLY the nine fields of manifestCandidateSchema",
+    "(tools/agent-supply-verifier/src/schema.ts), which is .strict() — any extra",
+    "field is rejected outright. So all research evidence lives in the separate",
+    "`research` map below, keyed by tokenId, and the `candidates` array can be",
+    "merged into tools/agent-supply-verifier/config/candidates.json as-is.",
+    "",
+    "DO NOT merge before reading the two gates below.",
+    "",
+    "GATE 1 — the three added candidates are almost certainly TEAM-OPERATED and are",
+    "flagged teamOperatedReference: true on that basis. They share one IP",
+    "(172.104.171.139) with the documented team agent 265375. Their owner wallets",
+    "differ from the team wallet and appear nowhere in the repo, so operator",
+    "identity could not be proven from outside the host. The user must confirm.",
+    "If they are NOT the team's, they are still not independent supply — they are a",
+    "third party sharing the team's server.",
+    "",
+    "GATE 2 — positioncrew (266229/266231/266232/266234) is the single most",
+    "promising external provider found and is deliberately NOT in `candidates`.",
+    "Its registered endpoint is an unsubstituted `{agentId}` template that 404s,",
+    "and its agent cards declare zero skills. Adding it now would only produce",
+    "verification failures. It belongs in `research` until the operator fixes both."
+  ],
+  "version": 1,
+  "candidates": [
+    {
+      "chainId": 56,
+      "tokenId": "269233",
+      "expectedName": "BNB Grid Trader (test)",
+      "expectedEndpoint": "https://bnb-grid.172-104-171-139.nip.io/.well-known/agent-card.json",
+      "expectedOrigin": "https://bnb-grid.172-104-171-139.nip.io",
+      "categories": ["grid"],
+      "source": "8004scan",
+      "provider": "MandateX reference cohort (unconfirmed - shares host with 265375)",
+      "teamOperatedReference": true
+    },
+    {
+      "chainId": 56,
+      "tokenId": "265876",
+      "expectedName": "BNB Yield Optimizer",
+      "expectedEndpoint": "https://bnb-yield.172-104-171-139.nip.io/.well-known/agent-card.json",
+      "expectedOrigin": "https://bnb-yield.172-104-171-139.nip.io",
+      "categories": ["yield"],
+      "source": "8004scan",
+      "provider": "MandateX reference cohort (unconfirmed - shares host with 265375)",
+      "teamOperatedReference": true
+    },
+    {
+      "chainId": 56,
+      "tokenId": "266933",
+      "expectedName": "BNB Lending Guardian",
+      "expectedEndpoint": "https://bnb-guardian.172-104-171-139.nip.io/.well-known/agent-card.json",
+      "expectedOrigin": "https://bnb-guardian.172-104-171-139.nip.io",
+      "categories": ["health"],
+      "source": "8004scan",
+      "provider": "MandateX reference cohort (unconfirmed - shares host with 265375)",
+      "teamOperatedReference": true
+    }
+  ],
+  "research": {
+    "269233": {
+      "class": "A",
+      "category": "grid",
+      "ownerOnChain": "0xfaf0ffd121947b9ee3920fa0cfbf9eeeb0acbf7f",
+      "ownerVerifiedBy": "eth_call ownerOf(269233) at 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432, chain 56",
+      "host": "172.104.171.139",
+      "endpointProbe": "HTTP 200, agent card name bnbGridTrader-agent, protocolVersion 0.3.0, 2 skills",
+      "createdAt": "2026-08-17T20:10:38Z",
+      "independent": false,
+      "notes": "Same IP as the documented team agent 265375. Description begins 'TEST DEPLOYMENT - not for production use'. Registered the same day this research ran."
+    },
+    "265876": {
+      "class": "A",
+      "category": "yield",
+      "ownerOnChain": "0xd16faaa91f77397bb84c69fbb89d11011be11212",
+      "ownerVerifiedBy": "eth_call ownerOf(265876)",
+      "host": "172.104.171.139",
+      "endpointProbe": "HTTP 200, agent card name 'BNB Yield Optimizer', 2 skills",
+      "independent": false,
+      "notes": "Same owner wallet as 266933. Only live yield agent found anywhere on chain 56."
+    },
+    "266933": {
+      "class": "A",
+      "category": "health",
+      "ownerOnChain": "0xd16faaa91f77397bb84c69fbb89d11011be11212",
+      "ownerVerifiedBy": "eth_call ownerOf(266933)",
+      "host": "172.104.171.139",
+      "endpointProbe": "HTTP 200, agent card name 'BNB Lending Guardian', protocolVersion 0.1.0, skills [negotiate, notify_funded]",
+      "independent": false,
+      "notes": "Monitors VENUS, not Aave. The item-4 adapter is aave-v3-health-v1, so hiring this agent would verify a different protocol than it operates on. See README 'Adapter mismatch'. Registered endpoint in the index is /a2a; the agent card is served at /.well-known/agent-card.json, which is what this file pins."
+    },
+    "265375": {
+      "class": "A",
+      "category": "rebalancing",
+      "ownerOnChain": "0x20f1ca5d1e5a3ee94c29dbf95e6bf6cea6a8d64b",
+      "ownerVerifiedBy": "eth_call ownerOf(265375)",
+      "host": "172.104.171.139",
+      "endpointProbe": "HTTP 200, agent card name bnbLpRangeRebalancer-agent, protocolVersion 0.3.0, 2 skills",
+      "independent": false,
+      "notes": "Already in candidates.json. Owner wallet appears in the repo config. The documented team agent."
+    },
+    "266231": {
+      "class": "A-blocked",
+      "category": "rebalancing",
+      "provider": "positioncrew (termix.live)",
+      "ownerOnChain": "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf",
+      "ownerVerifiedBy": "eth_call ownerOf(266231)",
+      "registeredEndpoint": "https://platform-backend.prod.termix.live/api/v1/a2a/agents/{agentId}/card",
+      "endpointProbe": "as registered: HTTP 404 (literal {agentId} placeholder). With tokenId substituted (/agents/266231/card): HTTP 200, name positioncrew-lp-rebalance.agent, skills 0, capabilities null, url null",
+      "independent": true,
+      "blockers": ["registered endpoint is an unsubstituted template", "agent card declares zero skills, so nothing is invocable"],
+      "notes": "Description: 'Evaluates a PancakeSwap V3 position and proposes a cost-, slippage-, inventory-, and break-even-bounded range...'. Strongest category alignment found."
+    },
+    "266234": {
+      "class": "A-blocked",
+      "category": "grid",
+      "provider": "positioncrew (termix.live)",
+      "ownerOnChain": "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf",
+      "ownerVerifiedBy": "eth_call ownerOf(266234)",
+      "endpointProbe": "tokenId-substituted path returns HTTP 200, name positioncrew-bounded-grid.agent, skills 0",
+      "independent": true,
+      "blockers": ["unsubstituted endpoint template", "zero skills"],
+      "notes": "Description: 'Constructs or rejects a PancakeSwap WBNB/USDT grid under explicit volatility, fee, slippage, inventory, gas... constraints'. The explicit reject path matches MandateX's fail-closed model."
+    },
+    "266232": {
+      "class": "A-blocked",
+      "category": "yield",
+      "provider": "positioncrew (termix.live)",
+      "ownerOnChain": "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf",
+      "ownerVerifiedBy": "eth_call ownerOf(266232)",
+      "endpointProbe": "tokenId-substituted path returns HTTP 200, name positioncrew-yield-optimizer.agent, skills 0",
+      "independent": true,
+      "blockers": ["unsubstituted endpoint template", "zero skills"],
+      "notes": "Description: 'Compares block-pinned Venus stablecoin markets...'. Venus, not ERC-4626 - the item-4 yield adapter is erc4626-yield-v1."
+    },
+    "266229": {
+      "class": "A-blocked",
+      "category": "health",
+      "provider": "positioncrew (termix.live)",
+      "ownerOnChain": "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf",
+      "ownerVerifiedBy": "eth_call ownerOf(266229)",
+      "endpointProbe": "tokenId-substituted path returns HTTP 200, name positioncrew-lending-rescue.agent, skills 0",
+      "independent": true,
+      "blockers": ["unsubstituted endpoint template", "zero skills"],
+      "notes": "Description: 'Computes the smallest bounded Venus debt repayment or collateral top-up needed to reach a buyer-selected health factor'. Note 'buyer-selected health factor' - this agent claims per-buyer thresholds, which the frozen v2 mandate schema cannot express (see plan.md section 7 known limitation)."
+    },
+    "269223": {
+      "class": "B",
+      "category": "rebalancing",
+      "provider": "chainhelix",
+      "ownerOnChain": "0x72070faa1e33d7f8b31397bc8da65be2b1f6281f",
+      "ownerVerifiedBy": "index detail only - ownerOf not run individually",
+      "endpointProbe": "agents.chainhelix.io is NXDOMAIN; unreachable",
+      "independent": true,
+      "notes": "Root chainhelix.io resolves to 89.167.76.137 and serves HTTP 200, so the org is real; the agents subdomain does not exist."
+    },
+    "269224": {
+      "class": "B",
+      "category": "grid",
+      "provider": "chainhelix",
+      "ownerOnChain": "0xb8143345687aa5a527f4f9568d508ebbc612d06d",
+      "ownerVerifiedBy": "eth_call ownerOf(269224)",
+      "endpointProbe": "agents.chainhelix.io is NXDOMAIN; unreachable",
+      "independent": true
+    },
+    "269226": {
+      "class": "B",
+      "category": "yield",
+      "provider": "chainhelix",
+      "ownerOnChain": "0xccae2da18278c663fc808fa858fd89cc34cf701f",
+      "ownerVerifiedBy": "index detail only - ownerOf not run individually",
+      "endpointProbe": "agents.chainhelix.io is NXDOMAIN; unreachable",
+      "independent": true
+    },
+    "269228": {
+      "class": "B",
+      "category": "health",
+      "provider": "chainhelix",
+      "ownerOnChain": "0x91f4602760e1627007bfc16f78a74cf8b9de8da2",
+      "ownerVerifiedBy": "eth_call ownerOf(269228)",
+      "endpointProbe": "agents.chainhelix.io is NXDOMAIN; unreachable",
+      "independent": true,
+      "notes": "Four chainhelix agents span all four categories under four DIFFERENT owner wallets but one domain, all registered 2026-08-17. Distinct wallets do not establish distinct providers."
+    },
+    "267697": {
+      "class": "B",
+      "category": "grid",
+      "provider": "Agent Studio",
+      "ownerOnChain": "0x16ec3c811bc03eb57b1519263803e4a22caae154",
+      "ownerVerifiedBy": "eth_call ownerOf(267697)",
+      "endpointProbe": "no services.a2a.endpoint recorded in the index; nothing to call",
+      "independent": true
+    },
+    "267698": {
+      "class": "B",
+      "category": "yield",
+      "provider": "Agent Studio",
+      "ownerOnChain": "0xc516961eda76622150006211ff9ea793ea4a879e",
+      "ownerVerifiedBy": "index detail only",
+      "endpointProbe": "no services.a2a.endpoint recorded; nothing to call",
+      "independent": true
+    },
+    "_bort_fleet": {
+      "class": "B",
+      "provider": "BORT (api.bortagent.xyz)",
+      "endpointProbe": "https://api.bortagent.xyz/.well-known/agent-card.json returns HTTP 200, name 'BORT Agent', 6 skills",
+      "independent": true,
+      "notes": "One shared generic card behind hundreds of separately-numbered registrations (BORT Yield Weaver #10877/#10922/#10937...). Skills are trade, market-data, holdings, signals, chat, paid-inference - BAP-578 / ERC-6551 trading bots. None is a rebalancing, grid, yield or health-factor quoting service, so despite 'Yield Weaver' naming this is not category supply. Registry count massively overstates distinct agents."
+    }
+  },
+  "registryFacts": {
+    "chainId": 56,
+    "registryAddress": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "name": "AgentIdentity",
+    "symbol": "AGENT",
+    "codeBytes": 148,
+    "totalSupply": "REVERTS - registry is not ERC721Enumerable, so on-chain enumeration is impossible and discovery must go through the indexer",
+    "chainIdCheck": "eth_chainId returned 0x38",
+    "rpc": "https://bsc-dataseed.binance.org",
+    "nonexistentTokenControl": "ownerOf(999999999) reverted, confirming the ownerOf reads above are real mints"
+  },
+  "indexerFacts": {
+    "origin": "https://8004scan.io",
+    "listEndpoint": "/api/v1/public/agents",
+    "workingChainFilter": "chainId=56 (camelCase) - honoured, 257637 agents on chain 56",
+    "brokenChainFilter": "chain_id=56 (snake_case) - ACCEPTED AND SILENTLY IGNORED, returns chains 1/56/97/2741/8453/42161 with unfiltered total 746319",
+    "affectsRepo": "No. tools/agent-supply-verifier/src/sources/8004scan.ts uses only the detail endpoint /agents/{chainId}/{tokenId} where chain is a path segment. A future LIST call using the snake_case spelling would silently ingest wrong-chain agents.",
+    "noQualityFilter": "verified=true, is_verified=true, sort=rank, sortBy=rank, orderBy=total_feedbacks, hasEndpoint=true and endpointVerified=true were all tried; every one returned the unfiltered total. There is no server-side way to ask for quality.",
+    "sample": "500 chain-56 rows across pages 1,2,5,10,25,50,100,250,500,1000: 0 verified, 0 with feedback, 0 with health score, 488 distinct owners. 208 rows named 'ave.ai trading agent' and 46 'q402 agent (by quack ai)' - roughly half the sample is two bulk campaigns.",
+    "rateLimit": "HTTP 429 at roughly more than one request per second; space detail lookups out"
+  },
+  "verdict": {
+    "independentProvidersWithLiveCategoryService": 1,
+    "independentProvidersHireableToday": 0,
+    "teamOperatedLiveAgents": 4,
+    "categoriesWithAnyLiveAgent": ["rebalancing", "grid", "yield", "health"],
+    "twoIndependentProvidersPerCategory": "NOT ACHIEVABLE by 2026-09-09",
+    "strategyMdFallbackAlsoUnmet": "Line 820's 'one callable external agent plus one clearly labelled reference agent per category' is not satisfied either - there is no callable external agent in any category.",
+    "corrections": "See supply/README.md 'Exact strategy.md corrections needed' for lines 73, 519, 520 and 820."
+  }
+}
