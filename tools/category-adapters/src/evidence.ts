@@ -13,6 +13,7 @@ import {
 import {
   GRID_EVIDENCE_SCHEMA,
   HEALTH_EVIDENCE_SCHEMA,
+  VENUS_HEALTH_EVIDENCE_SCHEMA,
   YIELD_EVIDENCE_SCHEMA,
 } from "./policy.js";
 
@@ -137,10 +138,47 @@ export const healthEvidenceSchema = z
   .strict();
 export type HealthEvidence = z.infer<typeof healthEvidenceSchema>;
 
+/**
+ * Venus lending health. Same envelope, different metric, because Venus is
+ * Compound-shaped and has no health factor to report.
+ *
+ * `marketsEntered` is carried for the same reason `totalDebtBase` is carried in the
+ * Aave document: it is the field that distinguishes "no position" from "a position
+ * with exactly zero buffer". Venus reports both as `liquidity == 0 && shortfall == 0`,
+ * and those two states deserve opposite verdicts.
+ */
+export const venusHealthEvidenceSchema = z
+  .object({
+    schema: z.literal(VENUS_HEALTH_EVIDENCE_SCHEMA),
+    category: z.literal("health"),
+    protocol: z.literal("venus"),
+    ...evidenceEnvelopeShape,
+    subject: z
+      .object({
+        comptrollerAddress: evmAddressSchema,
+        accountAddress: evmAddressSchema,
+      })
+      .strict(),
+    policy: z.object({ minLiquidityUsdScaled: uint256DecimalSchema }).strict(),
+    metric: z
+      .object({
+        /** 1e18-scaled USD above the collateral requirement. */
+        liquidityUsdScaled: uint256DecimalSchema,
+        /** 1e18-scaled USD below it. At most one of the two is nonzero. */
+        shortfallUsdScaled: uint256DecimalSchema,
+        /** Count of Venus markets the account has entered. */
+        marketsEntered: z.number().int().nonnegative().max(1_000),
+      })
+      .strict(),
+  })
+  .strict();
+export type VenusHealthEvidence = z.infer<typeof venusHealthEvidenceSchema>;
+
 export const categoryEvidenceDocumentSchema = z.discriminatedUnion("schema", [
   gridEvidenceSchema,
   yieldEvidenceSchema,
   healthEvidenceSchema,
+  venusHealthEvidenceSchema,
 ]);
 export type CategoryEvidenceDocument = z.infer<typeof categoryEvidenceDocumentSchema>;
 

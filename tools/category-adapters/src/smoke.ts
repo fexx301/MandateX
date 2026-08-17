@@ -7,7 +7,7 @@ import {
   displaySafeQuoteProjectionPayloadSchema,
 } from "@mandatex/marketplace-core";
 
-import { UINT256_MAX, decodeInt24, decodeUint256, wordCount } from "./abi.js";
+import { UINT256_MAX, decodeDynamicArrayLength, decodeInt24, decodeUint256, wordCount } from "./abi.js";
 import {
   categoryEvidenceDocumentSchema,
   toSignedCategoryEvidence,
@@ -20,12 +20,14 @@ import {
   DEFAULT_MIN_HEALTH_FACTOR_SCALED,
   GRID_ADAPTER_ID,
   HEALTH_ADAPTER_ID,
+  VENUS_HEALTH_ADAPTER_ID,
   YIELD_ADAPTER_ID,
 } from "./policy.js";
 import type { BlockAnchor } from "./primitives.js";
 import type { CallOutcome, PinnedBlockReader } from "./reader.js";
 import { sha256Hex } from "./reader.js";
 import { categoryGateObservation, type AdapterResult } from "./result.js";
+import { evaluateVenusHealth } from "./venus-health.js";
 import { evaluateYield } from "./yield.js";
 
 /**
@@ -540,6 +542,195 @@ async function main(): Promise<void> {
   await evaluateHealth(HEALTH_CONFIG, healthCalldata);
   check("the health read is a single call", healthCalldata.calls.length === 1);
 
+  // ── D2. Venus health ───────────────────────────────────────────────────────
+  group("Venus health adapter");
+
+  // Verbatim from the live Venus Comptroller on chain 56. The zero address has
+  // entered no markets, so this is the real no-position response.
+  const LIVE_VENUS_ASSETS_IN =
+    "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000";
+
+  const VENUS_CONFIG = {
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+    protocol: "venus",
+    comptrollerAddress: "0x5555555555555555555555555555555555555555",
+    accountAddress: ACCOUNT,
+    minLiquidityUsdScaled: (1_000n * 10n ** 18n).toString(10),
+  } as const;
+
+  /** `getAccountLiquidity()` return data: (error, liquidity, shortfall). */
+  const liquidityData = (error: bigint, liquidity: bigint, shortfall: bigint): string =>
+    returndata(word(error), word(liquidity), word(shortfall));
+
+  /** `getAssetsIn()` return data: offset then length, elements omitted when zero. */
+  const assetsInData = (count: number): string =>
+    returndata(
+      word(32n),
+      word(BigInt(count)),
+      ...Array.from({ length: count }, (_, index) => word(BigInt(index + 1))),
+    );
+
+  const venusLive = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 0n, 0n),
+      getAssetsIn: LIVE_VENUS_ASSETS_IN,
+    }),
+  );
+  check(
+    "the real on-chain no-position response is unknown, not a zero-buffer failure",
+    venusLive.status === "unknown" && venusLive.code === "VENUS_NO_POSITION",
+    venusLive.status,
+  );
+
+  const venusHealthy = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 5_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(2),
+    }),
+  );
+  check("liquidity above the floor passes", venusHealthy.status === "pass", venusHealthy.status);
+  check(
+    "the evidence records markets entered, so no-position stays distinguishable later",
+    venusHealthy.status === "pass" && venusHealthy.evidence.metric.marketsEntered === 2,
+  );
+  check(
+    "the Venus evidence declares the health category under the venus protocol",
+    venusHealthy.status === "pass" &&
+      venusHealthy.evidence.category === "health" &&
+      venusHealthy.evidence.protocol === "venus",
+  );
+
+  // Documents the known limitation in venus-health.ts rather than leaving it silent.
+  // A collateral-only account — markets entered, no borrows — is indistinguishable
+  // from a healthy borrower through `getAssetsIn`, so it passes. The Aave sibling
+  // refuses the equivalent case via `totalDebtBase`. If this is ever fixed with a
+  // borrow-balance read, this assertion must be consciously inverted, which is the
+  // point of asserting it.
+  const venusCollateralOnly = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(1),
+    }),
+  );
+  check(
+    "KNOWN GAP: a collateral-only account passes, because markets-entered is not debt",
+    venusCollateralOnly.status === "pass",
+    venusCollateralOnly.status,
+  );
+
+  const venusThin = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 999n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(1),
+    }),
+  );
+  check(
+    "liquidity below the floor fails",
+    venusThin.status === "fail" && venusThin.code === "VENUS_LIQUIDITY_BELOW_FLOOR",
+    venusThin.status,
+  );
+
+  const venusShortfall = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 0n, 250n * 10n ** 18n),
+      getAssetsIn: assetsInData(3),
+    }),
+  );
+  check(
+    "a shortfall is its own failure, stronger than being under the floor",
+    venusShortfall.status === "fail" && venusShortfall.code === "VENUS_ACCOUNT_SHORTFALL",
+    venusShortfall.status,
+  );
+
+  // Ordering matters: an account with no markets must never be reported
+  // liquidatable, even if the liquidity call somehow reports a shortfall.
+  const venusEmptyWithShortfall = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 0n, 250n * 10n ** 18n),
+      getAssetsIn: assetsInData(0),
+    }),
+  );
+  check(
+    "an account in no markets is never reported liquidatable",
+    venusEmptyWithShortfall.status === "unknown" &&
+      venusEmptyWithShortfall.code === "VENUS_NO_POSITION",
+    venusEmptyWithShortfall.status,
+  );
+
+  const venusError = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(9n, 0n, 0n),
+      getAssetsIn: assetsInData(2),
+    }),
+  );
+  check(
+    "an in-band error code is unknown, not a position with no buffer",
+    venusError.status === "unknown" && venusError.code === "VENUS_LIQUIDITY_COMPUTATION_FAILED",
+    venusError.status,
+  );
+
+  const venusInconsistent = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: liquidityData(0n, 10n ** 18n, 10n ** 18n),
+      getAssetsIn: assetsInData(2),
+    }),
+  );
+  check(
+    "both liquidity and shortfall nonzero violates Venus's invariant and is refused",
+    venusInconsistent.status === "unknown" &&
+      venusInconsistent.code === "VENUS_LIQUIDITY_INCONSISTENT",
+    venusInconsistent.status,
+  );
+
+  const venusShort = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({
+      getAccountLiquidity: returndata(word(0n), word(0n)),
+      getAssetsIn: assetsInData(1),
+    }),
+  );
+  check(
+    "a two-word liquidity response is malformed",
+    venusShort.status === "unknown" && venusShort.code === "READ_RETURNDATA_MALFORMED",
+    venusShort.status,
+  );
+
+  const venusDown = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    stubReader({ getAccountLiquidity: undefined, getAssetsIn: assetsInData(1) }),
+  );
+  check(
+    "an unreachable comptroller is unknown",
+    venusDown.status === "unknown" && venusDown.code === "READ_UNAVAILABLE",
+  );
+
+  // Dynamic-array header decoding, including the hostile-offset case.
+  check(
+    "the live getAssetsIn response decodes to zero markets",
+    decodeDynamicArrayLength(LIVE_VENUS_ASSETS_IN) === 0,
+  );
+  check("a populated array decodes its length", decodeDynamicArrayLength(assetsInData(3)) === 3);
+  check(
+    "an offset pointing past the end of the data is refused",
+    decodeDynamicArrayLength(returndata(word(320n), word(1n))) === undefined,
+  );
+  check(
+    "a length longer than the words present is refused",
+    decodeDynamicArrayLength(returndata(word(32n), word(9n))) === undefined,
+  );
+  check(
+    "a non-word-aligned offset is refused",
+    decodeDynamicArrayLength(returndata(word(33n), word(0n))) === undefined,
+  );
+
   // ── E. Fail-closed discipline ──────────────────────────────────────────────
   group("Fail-closed discipline");
 
@@ -635,8 +826,9 @@ async function main(): Promise<void> {
     gridInside.status === "pass" ? gridInside.evidence : undefined,
     yieldAbove.status === "pass" ? yieldAbove.evidence : undefined,
     healthy.status === "pass" ? healthy.evidence : undefined,
+    venusHealthy.status === "pass" ? venusHealthy.evidence : undefined,
   ].filter((value): value is CategoryEvidenceDocument => value !== undefined);
-  check("all three adapters produced evidence to inspect", documents.length === 3);
+  check("all four adapters produced evidence to inspect", documents.length === 4);
 
   const strayDigests: string[] = [];
   const walk = (value: unknown, path: string): void => {
@@ -666,7 +858,7 @@ async function main(): Promise<void> {
 
   for (const document of documents) {
     check(
-      `${document.category} evidence round-trips its own schema`,
+      `${document.adapterId} evidence round-trips its own schema`,
       categoryEvidenceDocumentSchema.safeParse(document).success,
     );
   }
@@ -677,17 +869,21 @@ async function main(): Promise<void> {
     try {
       digests.push(canonicalSha256(document));
     } catch (error) {
-      canonicalError = `${document.category}: ${(error as Error).message}`;
+      canonicalError = `${document.adapterId}: ${(error as Error).message}`;
     }
   }
   check(
     "every evidence document survives Core's own canonicalizer",
-    canonicalError === undefined && digests.length === 3,
+    canonicalError === undefined && digests.length === 4,
     canonicalError,
   );
   check(
     "each canonical digest is 64 hex characters",
     digests.every((digest) => /^[0-9a-f]{64}$/.test(digest)),
+  );
+  check(
+    "the two health adapters produce distinct digests despite sharing a category",
+    new Set(digests).size === 4,
   );
 
   // Canonicalization must be insensitive to key order, or the verifier and any
@@ -756,15 +952,24 @@ async function main(): Promise<void> {
   // ── G. Registry and hand-off integrity ─────────────────────────────────────
   group("Registry and hand-off integrity");
 
-  check("the registry covers exactly three categories", CATEGORY_ADAPTER_REGISTRY.length === 3);
+  check("the registry covers four adapters", CATEGORY_ADAPTER_REGISTRY.length === 4);
   check(
-    "the registry categories are grid, yield and health",
+    "the registry categories are grid, yield and health twice",
     JSON.stringify(CATEGORY_ADAPTER_REGISTRY.map((entry) => entry.category).sort()) ===
-      JSON.stringify(["grid", "health", "yield"]),
+      JSON.stringify(["grid", "health", "health", "yield"]),
   );
   check(
-    "every registered adapter id is unique",
-    new Set(CATEGORY_ADAPTER_REGISTRY.map((entry) => entry.adapterId)).size === 3,
+    "every registered adapter id is unique — the registry is keyed by adapter, not category",
+    new Set(CATEGORY_ADAPTER_REGISTRY.map((entry) => entry.adapterId)).size === 4,
+  );
+  check(
+    "health has two adapters on two different protocols",
+    CATEGORY_ADAPTER_REGISTRY.filter((entry) => entry.category === "health").length === 2 &&
+      new Set(
+        CATEGORY_ADAPTER_REGISTRY.filter((entry) => entry.category === "health").map(
+          (entry) => entry.protocol,
+        ),
+      ).size === 2,
   );
   check(
     "every registered adapter id ends in a version suffix",
@@ -779,7 +984,7 @@ async function main(): Promise<void> {
   check(
     "the registry's declared read counts match what the adapters actually issue",
     CATEGORY_ADAPTER_REGISTRY.every((entry) => {
-      const document = documents.find((candidate) => candidate.category === entry.category);
+      const document = documents.find((candidate) => candidate.adapterId === entry.adapterId);
       return document !== undefined && document.reads.length === entry.reads;
     }),
   );
@@ -787,7 +992,8 @@ async function main(): Promise<void> {
     "each adapter stamps its own id into its evidence",
     documents.every((document) =>
       CATEGORY_ADAPTER_REGISTRY.some(
-        (entry) => entry.category === document.category && entry.adapterId === document.adapterId,
+        (entry) =>
+          entry.adapterId === document.adapterId && entry.evidenceSchema === document.schema,
       ),
     ),
   );

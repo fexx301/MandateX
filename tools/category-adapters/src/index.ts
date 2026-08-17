@@ -6,4 +6,5 @@ export * from "./policy.js";
 export * from "./primitives.js";
 export * from "./reader.js";
 export * from "./result.js";
+export * from "./venus-health.js";
 export * from "./yield.js";

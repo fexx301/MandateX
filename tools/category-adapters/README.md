@@ -25,13 +25,27 @@ than against my own restatement of it: every evidence document is hashed with
 Core's `canonicalSha256`, and the narrowed evidence is parsed by Core's own
 `displaySafeQuoteProjectionPayloadSchema`.
 
-## The three adapters
+## The four adapters
 
 | Category | Adapter ID | Evidence schema | Reads | Metric |
 |---|---|---|---|---|
 | `grid` | `pancakeswap-v3-grid-v1` | `mandatex.category.grid-evidence.v1` | 1 | `slot0().tick` vs. the declared grid band |
 | `yield` | `erc4626-yield-v1` | `mandatex.category.yield-evidence.v1` | 2 | `totalAssets/totalSupply` share price vs. a floor |
 | `health` | `aave-v3-health-v1` | `mandatex.category.health-evidence.v1` | 1 | `getUserAccountData().healthFactor` vs. a floor |
+| `health` | `venus-health-v1` | `mandatex.category.venus-health-evidence.v1` | 2 | `getAccountLiquidity()` liquidity/shortfall vs. a floor |
+
+**`CATEGORY_ADAPTER_REGISTRY` is keyed by adapter ID, not by category.** `health`
+has two entries. That is not redundancy: BSC has two major lending protocols with
+structurally incompatible interfaces, and the external supply research (`supply/`)
+found that **every live health agent on chain 56 monitors Venus, not Aave** —
+including the team's own `bnb-guardian`. A table keyed by category cannot express
+that, and would silently pick one protocol for a category whose actual supply uses
+the other.
+
+Both health adapters are kept. Aave v3 is genuinely deployed on BSC — verified,
+1933 bytes of proxy code at `0x6807dc923806fE8Fd134338EABCA509979a7e0cB` — so
+`aave-v3-health-v1` is not wrong, it is aimed at supply that does not exist yet.
+`venus-health-v1` is aimed at the supply that does.
 
 The IDs follow the shape Core already uses for the one supported adapter,
 `pancakeswap-v3-rebalancing-v1`, so these read as members of the same family
@@ -43,6 +57,53 @@ need order-level state a single pool read cannot see. Each metric is spelled out
 in `CATEGORY_ADAPTER_REGISTRY` so the claim stays narrower than the category name
 suggests.
 
+### Why Venus is a separate adapter and not a configuration
+
+Venus is a Compound-v2 fork and **has no health factor at all**.
+`getAccountLiquidity(address)` returns `(error, liquidity, shortfall)` — an
+absolute USD buffer above the collateral requirement, or an absolute amount below
+it, with at most one of the two nonzero. Three words with different meanings and no
+ratio anywhere. Verified against the live Comptroller at
+`0xfD36E2c2a6789Db23113685031d7F16329158384`: three words returned, versus Aave's
+six.
+
+Two consequences that shape the adapter:
+
+**It needs a second read.** Venus reports both "no position at all" and "a position
+with exactly zero buffer" as `liquidity == 0 && shortfall == 0`. Those deserve
+opposite verdicts — nothing to maintain, versus the riskiest non-liquidatable state
+there is — and one call cannot tell them apart. `getAssetsIn` disambiguates by
+returning the markets entered. Without it the adapter would treat a maximally
+leveraged position and an empty account identically.
+
+**Its metric is weaker than Aave's, and that is recorded rather than hidden.** An
+absolute USD floor does not scale with position size the way a health factor does:
+a $10,000 buffer is ample on a $50,000 position and thin on a $5,000,000 one. Venus
+exposes no single call that normalizes it, and deriving a true ratio would need
+per-market borrow balances — far past "one real metric". So the floor has to be set
+with the monitored position's size in mind.
+
+Venus also reports failure **in band** — a nonzero first word rather than a revert
+— so the error code is checked explicitly before the other two words are read. A
+failed computation returns zeros, so skipping that check would make an error look
+like a position with no buffer.
+
+### The Venus adapter's guarantee is narrower than Aave's — known, not hidden
+
+`aave-v3-health-v1` reads `totalDebtBase` directly and refuses the no-debt case
+outright. `venus-health-v1` detects **no position**, which is not the same thing:
+`getAssetsIn` returns the markets an account has *entered*, and enabling an asset as
+collateral counts even if nothing was ever borrowed against it. So a collateral-only
+Venus account has `marketsEntered > 0`, a large `liquidity`, no shortfall — and
+**passes**, despite having no debt to maintain and a health mandate being vacuous
+for it.
+
+Closing that gap needs a borrow balance, which Venus exposes only per market
+(`borrowBalanceStored` on each vToken). That means either an unbounded fan-out over
+the entered markets or a new required config field naming the market to monitor —
+a config-shape change, so it is recorded for decision rather than taken
+unilaterally. Flagged in `plan.md` §7.
+
 ### Every selector was computed, not recalled
 
 ```
@@ -50,6 +111,8 @@ suggests.
 0x01e1d114  totalAssets()
 0x18160ddd  totalSupply()
 0xbf92857c  getUserAccountData(address)
+0x5ec88c79  getAccountLiquidity(address)
+0xabfceffc  getAssetsIn(address)
 ```
 
 Verified with `viem.toFunctionSelector`. A wrong selector does not error — it
@@ -84,12 +147,22 @@ assigned on that basis alone:
 | `GRID_SPOT_OUTSIDE_BAND` | fail | Spot tick is outside the declared band |
 | `YIELD_SHARE_PRICE_BELOW_FLOOR` | fail | Share price under the configured floor |
 | `HEALTH_FACTOR_BELOW_FLOOR` | fail | Health factor under the configured floor |
+| `VENUS_ACCOUNT_SHORTFALL` | fail | Below the Venus collateral requirement, liquidatable now |
+| `VENUS_LIQUIDITY_BELOW_FLOOR` | fail | Excess Venus liquidity under the configured floor |
 | `READ_UNAVAILABLE` | unknown | A required call did not complete |
 | `READ_RETURNDATA_MALFORMED` | unknown | A call returned non-static-ABI data |
 | `YIELD_SHARE_PRICE_UNDEFINED` | unknown | No shares outstanding, so the ratio is 0/0 |
 | `HEALTH_NO_DEBT_POSITION` | unknown | No debt, so no health factor to maintain |
+| `VENUS_NO_POSITION` | unknown | No Venus markets entered, so no position to maintain |
+| `VENUS_LIQUIDITY_COMPUTATION_FAILED` | unknown | Venus returned a nonzero in-band error code |
+| `VENUS_LIQUIDITY_INCONSISTENT` | unknown | Both liquidity and shortfall nonzero, which Venus forbids |
 | `GRID_TICK_UNINTERPRETABLE` | unknown | Tick outside the range a v3 pool can hold |
 | `GRID_SQRT_PRICE_IMPLAUSIBLE` | unknown | Sqrt price outside the range a v3 pool can hold |
+
+`VENUS_ACCOUNT_SHORTFALL` is a separate code from `VENUS_LIQUIDITY_BELOW_FLOOR`
+because "liquidatable right now" is a stronger statement than "under our floor",
+and collapsing them would lose that. `VENUS_NO_POSITION` is checked **before** the
+shortfall branch so an empty account can never be reported as liquidatable.
 
 ### Two failure classes, deliberately handled differently
 
@@ -118,19 +191,25 @@ wrong number. Pin addresses from each protocol's own published deployment record
 { adapterId: "erc4626-yield-v1", protocol: "erc4626",
   vaultAddress: "0x…", minSharePriceScaled: "1000000000000000000" }
 
-// health
+// health (Aave v3)
 { adapterId: "aave-v3-health-v1", protocol: "aave-v3",
   poolAddress: "0x…", accountAddress: "0x…",
   minHealthFactorScaled: "1100000000000000000" }  // optional, this is the default
+
+// health (Venus)
+{ adapterId: "venus-health-v1", protocol: "venus",
+  comptrollerAddress: "0x…", accountAddress: "0x…",
+  minLiquidityUsdScaled: "…" }  // required, 1e18-scaled USD
 ```
 
 ### Thresholds
 
 | Adapter | Threshold | Default | Units |
 |---|---|---|---|
-| grid | `lowerTick` / `upperTick` | **none — required** | pool ticks |
-| yield | `minSharePriceScaled` | **none — required** | asset atomic units per 10¹⁸ share atomic units |
-| health | `minHealthFactorScaled` | `1100000000000000000` (1.1) | 1e18-scaled |
+| `pancakeswap-v3-grid-v1` | `lowerTick` / `upperTick` | **none — required** | pool ticks |
+| `erc4626-yield-v1` | `minSharePriceScaled` | **none — required** | asset atomic units per 10¹⁸ share atomic units |
+| `aave-v3-health-v1` | `minHealthFactorScaled` | `1100000000000000000` (1.1) | 1e18-scaled ratio |
+| `venus-health-v1` | `minLiquidityUsdScaled` | **none — required** | 1e18-scaled USD, absolute |
 
 The health default is 1.1, not 1.0. Aave liquidates below 1.0, so a floor at
 exactly 1.0 passes an account one adverse tick from liquidatable — a true
@@ -205,8 +284,12 @@ Three coordinated changes, per the integration boundary. Ordered.
 **1. Core — a static policy table entry per category.** Closed and immutable: no
 module discovery, no runtime callbacks, no environment-selected code, no telemetry
 executed inside Core. The values to hard-code are the adapter IDs and evidence
-schema strings in the table at the top of this document. The sites that currently
-hard-fail are:
+schema strings in the table at the top of this document.
+
+**There are four adapter IDs, not three, and `health` has two.** If Core's policy
+table is keyed by category with one adapter each, it cannot express the protocol
+that the actual BSC supply uses. Key it by adapter ID, or allow a category to carry
+a set. The sites that currently hard-fail are:
 
 - `tools/marketplace-core/src/codes.ts:70-72` — the three `CATEGORY_*_UNSUPPORTED` constants
 - `tools/marketplace-core/src/codes.ts:159-161` — their "not implemented in Marketplace Core v1" messages
@@ -241,6 +324,9 @@ identity that no longer describes it. Then redeploy signer and evaluator togethe
 - **Thresholds are global, not per-user.** See below. If per-user thresholds are
   wanted for September, that is a mandate-schema field and therefore a coordinated
   contract version.
+- **Venus cannot currently refuse a collateral-only account.** See the section
+  above. Closing it needs either a fan-out over entered markets or a new required
+  config field naming the market — a config-shape change.
 
 ## Known limitation: thresholds are deployment policy, not user policy
 

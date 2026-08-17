@@ -31,6 +31,8 @@ export const adapterFailCodeSchema = z.enum([
   "GRID_SPOT_OUTSIDE_BAND",
   "YIELD_SHARE_PRICE_BELOW_FLOOR",
   "HEALTH_FACTOR_BELOW_FLOOR",
+  "VENUS_ACCOUNT_SHORTFALL",
+  "VENUS_LIQUIDITY_BELOW_FLOOR",
 ]);
 export type AdapterFailCode = z.infer<typeof adapterFailCodeSchema>;
 
@@ -41,6 +43,11 @@ export const adapterUnknownCodeSchema = z.enum([
   // Domain states where the metric is genuinely undefined rather than bad.
   "YIELD_SHARE_PRICE_UNDEFINED",
   "HEALTH_NO_DEBT_POSITION",
+  // Venus reports a computation error in-band rather than reverting, and its
+  // liquidity/shortfall pair has an invariant that can be checked.
+  "VENUS_LIQUIDITY_COMPUTATION_FAILED",
+  "VENUS_NO_POSITION",
+  "VENUS_LIQUIDITY_INCONSISTENT",
   // The pool answered, but not with a state a v3 pool can be in.
   "GRID_TICK_UNINTERPRETABLE",
   "GRID_SQRT_PRICE_IMPLAUSIBLE",
@@ -55,6 +62,16 @@ const messages: Readonly<Record<AdapterFailCode | AdapterUnknownCode, string>> =
       "The vault's share price is below the configured floor.",
     HEALTH_FACTOR_BELOW_FLOOR:
       "The account's health factor is below the configured floor.",
+    VENUS_ACCOUNT_SHORTFALL:
+      "The account is below its Venus collateral requirement and is liquidatable.",
+    VENUS_LIQUIDITY_BELOW_FLOOR:
+      "The account's excess Venus liquidity is below the configured floor.",
+    VENUS_LIQUIDITY_COMPUTATION_FAILED:
+      "Venus returned a nonzero error code instead of a liquidity result, so the metric could not be established.",
+    VENUS_NO_POSITION:
+      "The account has entered no Venus markets, so there is no collateral position to maintain.",
+    VENUS_LIQUIDITY_INCONSISTENT:
+      "Venus reported both excess liquidity and a shortfall, which the protocol's own invariant forbids.",
     READ_UNAVAILABLE:
       "A required on-chain read did not complete, so the metric could not be established.",
     READ_RETURNDATA_MALFORMED:

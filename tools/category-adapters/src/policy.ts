@@ -36,10 +36,13 @@ import { adapterIdSchema, evmAddressSchema, tickSchema, uint256DecimalSchema } f
 export const GRID_ADAPTER_ID = "pancakeswap-v3-grid-v1" as const;
 export const YIELD_ADAPTER_ID = "erc4626-yield-v1" as const;
 export const HEALTH_ADAPTER_ID = "aave-v3-health-v1" as const;
+export const VENUS_HEALTH_ADAPTER_ID = "venus-health-v1" as const;
 
 export const GRID_EVIDENCE_SCHEMA = "mandatex.category.grid-evidence.v1" as const;
 export const YIELD_EVIDENCE_SCHEMA = "mandatex.category.yield-evidence.v1" as const;
 export const HEALTH_EVIDENCE_SCHEMA = "mandatex.category.health-evidence.v1" as const;
+export const VENUS_HEALTH_EVIDENCE_SCHEMA =
+  "mandatex.category.venus-health-evidence.v1" as const;
 
 /**
  * Verified function selectors. Computed with `viem.toFunctionSelector`, not
@@ -50,6 +53,8 @@ export const SELECTOR_SLOT0 = "0x3850c7bd" as const; // slot0()
 export const SELECTOR_TOTAL_ASSETS = "0x01e1d114" as const; // totalAssets()
 export const SELECTOR_TOTAL_SUPPLY = "0x18160ddd" as const; // totalSupply()
 export const SELECTOR_GET_USER_ACCOUNT_DATA = "0xbf92857c" as const; // getUserAccountData(address)
+export const SELECTOR_GET_ACCOUNT_LIQUIDITY = "0x5ec88c79" as const; // getAccountLiquidity(address)
+export const SELECTOR_GET_ASSETS_IN = "0xabfceffc" as const; // getAssetsIn(address)
 
 /** Fixed scale for every ratio this package derives. */
 export const RATIO_SCALE = 10n ** 18n;
@@ -140,15 +145,56 @@ export const healthAdapterConfigSchema = z
   .strict();
 export type HealthAdapterConfig = z.infer<typeof healthAdapterConfigSchema>;
 
+/**
+ * Venus lending health.
+ *
+ * Venus is a Compound-v2 fork, so it does not expose a health factor at all.
+ * `getAccountLiquidity` returns `(error, liquidity, shortfall)` — an absolute USD
+ * buffer above the collateral requirement, or an absolute amount below it, with at
+ * most one of the two nonzero. This is a **different adapter, not a configuration
+ * of the Aave one**: three words with different meanings, and no ratio anywhere.
+ *
+ * Honest limitation, stated because it is easy to miss: an absolute USD floor does
+ * not scale with position size the way a health factor does. A $10,000 buffer is
+ * ample on a $50,000 position and thin on a $5,000,000 one, and Venus gives no
+ * single call that normalizes it. Deriving a true ratio would need per-market
+ * borrow balances, which is far past "one real metric". So this metric is weaker
+ * than the Aave one and the floor has to be set with the monitored position's size
+ * in mind. That is recorded rather than hidden.
+ */
+export const venusHealthAdapterConfigSchema = z
+  .object({
+    adapterId: z.literal(VENUS_HEALTH_ADAPTER_ID),
+    protocol: z.literal("venus"),
+    /** The Venus Comptroller (Unitroller proxy) for the target deployment. */
+    comptrollerAddress: evmAddressSchema,
+    accountAddress: evmAddressSchema,
+    /**
+     * Minimum excess liquidity in 1e18-scaled USD. Required, with no default,
+     * because a defensible default cannot exist for an absolute amount — see the
+     * limitation above.
+     */
+    minLiquidityUsdScaled: uint256DecimalSchema,
+  })
+  .strict();
+export type VenusHealthAdapterConfig = z.infer<typeof venusHealthAdapterConfigSchema>;
+
 export const categoryAdapterConfigSchema = z.discriminatedUnion("adapterId", [
   z.object({ adapterId: z.literal(GRID_ADAPTER_ID) }).passthrough(),
   z.object({ adapterId: z.literal(YIELD_ADAPTER_ID) }).passthrough(),
   z.object({ adapterId: z.literal(HEALTH_ADAPTER_ID) }).passthrough(),
+  z.object({ adapterId: z.literal(VENUS_HEALTH_ADAPTER_ID) }).passthrough(),
 ]);
 
 /**
  * The registry a verifier deployment pins, and the exact set of values that must
  * be hashed into the verifier policy digest.
+ *
+ * **Keyed by adapter ID, not by category.** `health` has two entries, because BSC
+ * has two lending protocols with incompatible interfaces and the live agents
+ * observed on chain use Venus rather than Aave. A table keyed by category could
+ * not express that, and would silently pick one protocol for a category whose
+ * supply uses the other.
  *
  * Enabling a category is three coordinated changes, per the integration
  * boundary: one static Core policy entry, a verifier-policy-hash update, and a
@@ -180,6 +226,14 @@ export const CATEGORY_ADAPTER_REGISTRY = Object.freeze([
     protocol: "aave-v3" as const,
     metric: "getUserAccountData().healthFactor versus a declared floor",
     reads: 1,
+  }),
+  Object.freeze({
+    category: "health" as const,
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+    evidenceSchema: VENUS_HEALTH_EVIDENCE_SCHEMA,
+    protocol: "venus" as const,
+    metric: "getAccountLiquidity() excess liquidity and shortfall versus a declared floor",
+    reads: 2,
   }),
 ]);
 

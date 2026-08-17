@@ -89,6 +89,37 @@ export function selectorCalldata(selector: string): string {
 }
 
 /**
+ * Length of a single dynamic array return, without decoding its elements.
+ *
+ * A static-ABI return holding one dynamic array is `[offset, ...]` where the word
+ * at `offset` is the element count. Only the count is needed here — the caller
+ * wants to know whether an account has entered any markets, not which — so the
+ * elements are deliberately not decoded. Reading fewer fields than are present is
+ * the safer direction: nothing downstream can then depend on an element this
+ * function did not validate.
+ *
+ * Returns `undefined` unless the payload is word-aligned, the offset is itself
+ * word-aligned, and the length word lies inside the data. A hostile offset
+ * pointing past the end is the obvious attack on this shape, so it is bounds
+ * checked rather than trusted.
+ */
+export function decodeDynamicArrayLength(data: string): number | undefined {
+  const words = wordCount(data);
+  if (words === undefined || words < 2) return undefined;
+  const offset = decodeUint256(data, 0);
+  if (offset === undefined) return undefined;
+  if (offset % 32n !== 0n) return undefined;
+  const lengthIndex = Number(offset / 32n);
+  if (!Number.isSafeInteger(lengthIndex) || lengthIndex >= words) return undefined;
+  const length = decodeUint256(data, lengthIndex);
+  if (length === undefined) return undefined;
+  // The declared length must be backed by words actually present, or the array
+  // header is describing data the response does not contain.
+  if (length > BigInt(words - lengthIndex - 1)) return undefined;
+  return Number(length);
+}
+
+/**
  * Calldata for a single `address` argument: selector plus one left-padded word.
  * The address is validated by the caller's schema before reaching this.
  */
