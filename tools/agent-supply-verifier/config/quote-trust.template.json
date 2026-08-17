@@ -1,0 +1,30 @@
+{
+  "schema": "mandatex.agent-supply.quote-trust.v1",
+  "candidates": [
+    {
+      "chainId": 56,
+      "registryAddress": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+      "tokenId": "265375",
+      "category": "rebalancing",
+      "cardUrl": "https://bnb-lp.172-104-171-139.nip.io/.well-known/agent-card.json",
+      "quoteEndpoint": "https://bnb-lp.172-104-171-139.nip.io/",
+      "expectedProvider": "0x20f1ca5d1e5a3ee94c29dbf95e6bf6cea6a8d64b",
+      "providerKind": "eoa",
+      "commerceContract": "0xea4daa3100a767e86fded867729ae7446476eba6",
+      "protocol": {
+        "a2a": "0.3.x",
+        "method": "message/send",
+        "skill": "negotiate",
+        "signature": "eip191-negotiation-hash-string",
+        "signedTaskCodec": "mandatex-rebalance:v1"
+      },
+      "maxPassiveAgeSeconds": 300,
+      "maxQuoteTtlSeconds": 900,
+      "maxClockSkewSeconds": 30,
+      "allowedCurrencies": [
+        "REPLACE_WITH_THE_DEPLOYED_BSC_MAINNET_QUOTE_CURRENCY"
+      ],
+      "maxPrice": "0"
+    }
+  ]
+}

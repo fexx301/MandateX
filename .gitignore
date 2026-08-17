@@ -1,0 +1,114 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# MandateX root ignore rules.
+#
+# Package-level .gitignore files also exist and still apply to their subtrees:
+#   agents/mandaterebalance/.gitignore      (ignores .studio/ wholesale)
+#   agents/mandaterebalance/app/agent/.gitignore
+#   tools/agent-supply-verifier/.gitignore
+#   tools/marketplace-core/.gitignore
+#
+# The secret rules below are DEFENSE IN DEPTH — deliberately redundant with
+# those files, so a stray secret created outside a covered subtree is still
+# caught. Do not "clean up" the duplication.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══ SECRETS — never commit, at any depth ═══════════════════════════════════
+# Wallet material, keystores, unlock passwords, provider keys.
+.studio/
+**/.studio/
+.studio/wallets/
+**/wallets/
+audit-log.jsonl
+**/audit-log.jsonl
+
+# Environment files, all variants, all depths.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Key and credential material by extension.
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.asc
+*.gpg
+id_rsa*
+id_ed25519*
+
+# Ed25519 signer material for the v2 evaluation attestation (see
+# tools/marketplace-core/EVALUATION_ATTESTATION_V2.md). The verifier runtime
+# owns the private key; it must never enter version control.
+signer-*.json
+*-signing-key*
+*.privkey
+secrets/
+.secrets/
+.private/
+
+# Common secret-ish names, any depth.
+**/*secret*
+**/*mnemonic*
+**/*seed-phrase*
+!**/*secretless*
+
+# ═══ PERSONAL / LOCAL — machine-specific, not project state ═════════════════
+# Agent + editor config installed per-machine and regeneratable.
+.claude/
+.cursor/
+.idea/
+.vscode/
+*.code-workspace
+
+# Personal notes. Use these conventions for anything you don't want tracked:
+#   notes/            — scratch directory
+#   *.private.md      — private note, any location
+#   *.local.md        — machine-local note
+notes/
+scratch/
+*.private.md
+*.local.md
+*.draft.md
+TODO.personal.md
+
+# Reviews and external commentary kept outside the repo stay outside; these
+# patterns catch copies pulled in.
+*review*.md
+!tools/**/README.md
+
+# ═══ BUILD / DEPENDENCY ARTIFACTS ══════════════════════════════════════════
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+coverage/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Vendored corepack pnpm install (~19MB, regenerable via corepack).
+.corepack/
+
+# ═══ RUN ARTIFACTS ═════════════════════════════════════════════════════════
+# Verifier run reports are regenerable from the tool and may carry endpoint /
+# identity observations. Files stay on disk — this only untracks them.
+# If a report becomes part of the submission evidence pack, force-add it:
+#   git add -f tools/agent-supply-verifier/reports/<file>.json
+reports/
+**/reports/
+*.log
+logs/
+
+# ═══ OS JUNK ═══════════════════════════════════════════════════════════════
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

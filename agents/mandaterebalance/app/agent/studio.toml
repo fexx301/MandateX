@@ -1,0 +1,93 @@
+[project]
+name = "mandaterebalance-agent"
+
+[stack]
+# Project-lifetime facts: which runtime adapter recipe this Agent was
+# scaffolded against. doctor / dev / deploy read these to know what to
+# check, load, and route. runtime: agentcore | azure-foundry.
+runtime = "agentcore"
+# Public faces exposed by this one runtime and signer (canonical order):
+#   A2A — serveA2a: agent card + negotiate/notify_funded skills.
+#   MCP — streamable-HTTP /mcp: negotiate (signed quote) + notify_funded
+#         (verify → deliver → submit, synchronously within the tool call) +
+#         read-only chain tools.
+#   X402 — publish the sibling /x402 seller route. X402-only still declares
+#          A2A natively to AgentCore but suppresses that protocol face at the
+#          platform gateway.
+protocols = ["A2A"]
+
+[network]
+default = "bsc-testnet"
+
+[wallet]
+# Local keystore signer. The Agent is the SOLE key-holder/signer.
+# The keystore lives at the WORKSPACE root — outside app/agent (the deploy
+# codeLocation) — so no packaging path can bundle it into a deploy artifact.
+kind = "evm-local"
+signer = "local"
+keystore_dir = "../../.studio/wallets"
+# address = "0x..."   # filled by `bag wallet new`
+
+[llm]
+provider = "pieverse-llm"
+model = "auto/free"
+
+[llm.pieverse]
+# Pieverse topup runs ONLY on BSC mainnet (chainId=56); decoupled from [network].default.
+network = "bsc-mainnet"
+# key_hash = "..."        # written by `bag llm activate`
+# zero-deposit default. `bag llm activate` creates the key with $0
+# allocation; switch to a paid model + `bag llm topup` only when you need it.
+initial_allocation_usd = 0
+
+[llm.auto_renew]
+# hook auto-allocates from Pieverse Account Balance to the API key when Key
+# Credit < min_balance_usd. Account Balance is NEVER refilled automatically
+# from your wallet UNLESS you opt in via `bag budget enable` — defaults below
+# stay in allocate-only mode. This automatic hook IS the agent's LLM-credit
+# self-top-up (NOT an LLM-callable tool).
+enabled = true            # set false to opt out of in-process auto-allocate
+min_balance_usd = 0.01    # Key Credit threshold that triggers allocate
+topup_chunk_usd = 1.0     # chunk pulled from Account Balance per allocate
+max_topup_per_day_usd = 3.0   # opt-in cap; only enforced when `bag budget enable` is on
+check_interval_seconds = 60
+
+[payments.erc8183]
+# Read by the Agent: it quotes the FIXED `price`, CLAMPS it to [min,max],
+# freezes a short-TTL offer, and EIP-191 signs it — pricing is rule-based, the
+# LLM never prices. price=0 is FREE and is supported by the canonical stack.
+currency = "0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565"   # $U token address — prefilled from [network].default
+price = "0"                    # token base units; 0 = FREE (zero token escrow)
+min_price = "0"                                # wei — clamp floor
+max_price = ""                                 # wei — clamp ceiling; SET before going live
+quote_ttl_seconds = 900                        # seconds a signed quote stays valid; SDK caps at 900 (~15min work window)
+default_estimated_completion_seconds = 600
+poll_interval_seconds = 30
+auto_settle = false                            # opt-in: detect dispute-window-elapsed → settle
+
+[storage]
+# Deliverables written to local disk (file://). Offline-dev only —
+# does NOT survive deploy. Path from STORAGE_LOCAL_PATH.
+kind = "local"
+
+
+[payments.x402]
+# Optional: PIN the trusted Pieverse pay-to address. Leave empty — `bag llm
+# topup` / auto-topup auto-discover it from the hardcoded, SIWE-authenticated
+# topup endpoint (validated chain + U asset). Set a value only to pin a
+# specific recipient; the generic x402 buyer still never trusts an un-pinned
+# payTo from an arbitrary URL.
+expected_recipient = ""
+allowed_hosts = ["llm.pieverse.io"]
+
+[budget]
+# auto-topup consent — `acknowledged_at` is the ISO-8601 UTC
+# timestamp marking when the user explicitly accepted the auto-topup terms.
+# Both `enabled = true` AND a valid `acknowledged_at` are required for the
+# in-process auto-topup hook to fire (defends against hand-edits).
+enabled = false
+acknowledged_at = "2026-08-16T14:00:03Z"
+# Caps — tighten/loosen via `bag budget enable --max-per-topup-usd N ...`
+max_per_topup_usd = 1.0
+max_per_day_usd = 3.0
+max_per_month_usd = 15.0

@@ -1,0 +1,31 @@
+{
+  "name": "@mandatex/agent-supply-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Passive BSC agent supply verification plus explicitly armed trusted quote validation for MandateX.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:live": "MANDATEX_LIVE_SUPPLY=1 node --import tsx --test test/live.test.ts",
+    "verify": "node --import tsx src/cli.ts",
+    "verify:quote": "node --import tsx src/quote-cli.ts",
+    "verify:preview": "node --import tsx src/preview-cli.ts",
+    "verify:activation": "node --import tsx src/activation-cli.ts"
+  },
+  "dependencies": {
+    "@bnbagent/sdk": "0.5.0",
+    "viem": "^2.55.16",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

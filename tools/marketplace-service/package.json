@@ -1,0 +1,32 @@
+{
+  "name": "@mandatex/marketplace-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trusted in-process composition service for MandateX supply verification and Marketplace Core evaluation.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@mandatex/agent-supply-verifier": "file:../agent-supply-verifier",
+    "@mandatex/marketplace-core": "file:../marketplace-core",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

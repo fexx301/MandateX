@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "candidates": [
+    {
+      "chainId": 56,
+      "tokenId": "265375",
+      "expectedName": "BNB LP Range Rebalancer",
+      "expectedEndpoint": "https://bnb-lp.172-104-171-139.nip.io/.well-known/agent-card.json",
+      "expectedOrigin": "https://bnb-lp.172-104-171-139.nip.io",
+      "categories": ["rebalancing"],
+      "source": "8004scan",
+      "provider": "MandateX reference cohort",
+      "teamOperatedReference": true
+    }
+  ]
+}

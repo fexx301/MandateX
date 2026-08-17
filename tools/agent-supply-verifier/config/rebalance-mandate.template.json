@@ -1,0 +1,46 @@
+{
+  "version": "1",
+  "mandate_id": "replace-with-a-unique-id",
+  "category": "rebalancing",
+  "chain_id": 56,
+  "protocol": "pancakeswap-v3",
+  "expires_at": 0,
+  "max_evidence_age_seconds": 120,
+  "position": {
+    "pool_address": "REPLACE_WITH_THE_BSC_POOL_ADDRESS",
+    "position_manager_address": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+    "token_id": "REPLACE_WITH_THE_LP_POSITION_TOKEN_ID"
+  },
+  "range_policy": {
+    "approved_lower_tick": -600,
+    "approved_upper_tick": 600,
+    "target_width_ticks": 240,
+    "trigger_mode": "boundary_proximity",
+    "trigger_distance_ticks": 30,
+    "max_delivery_tick_drift": 30
+  },
+  "limits": {
+    "max_gas_usd": 3,
+    "max_slippage_bps": 50,
+    "max_exposure_usd": 1000
+  },
+  "execution_estimate": {
+    "gas_usd": 0,
+    "slippage_bps": 0,
+    "exposure_usd": 0,
+    "observed_at": 0,
+    "source_url": "https://example.invalid/replace-with-fresh-estimate"
+  },
+  "permissions": {
+    "allowed_contracts": [
+      "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364"
+    ],
+    "allowed_calls": [
+      "decreaseLiquidity((uint256,uint128,uint256,uint256,uint256))",
+      "collect((uint256,address,uint128,uint128))",
+      "mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))"
+    ],
+    "spend_cap_usd": 0,
+    "expires_at": 0
+  }
+}

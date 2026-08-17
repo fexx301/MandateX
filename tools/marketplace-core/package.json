@@ -1,0 +1,30 @@
+{
+  "name": "@mandatex/marketplace-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic, execution-free eligibility and ranking core for the MandateX RFQ marketplace.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

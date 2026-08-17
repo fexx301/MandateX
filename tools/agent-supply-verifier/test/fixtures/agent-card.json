@@ -1,0 +1,51 @@
+{
+  "capabilities": {
+    "streaming": false
+  },
+  "defaultInputModes": [
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "description": "ERC-8183 seller agent fixture. Declared skills are never invoked by this verifier.",
+  "name": "bnbLpRangeRebalancer-agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Return a signed quote when actively invoked by a buyer.",
+      "id": "negotiate",
+      "inputModes": [
+        "application/json"
+      ],
+      "name": "Negotiate an ERC-8183 job",
+      "outputModes": [
+        "application/json"
+      ],
+      "tags": [
+        "erc8183",
+        "negotiation",
+        "bnb-chain"
+      ]
+    },
+    {
+      "description": "Notify the seller only after a buyer funds a job.",
+      "id": "notify_funded",
+      "inputModes": [
+        "application/json"
+      ],
+      "name": "Notify funded",
+      "outputModes": [
+        "application/json"
+      ],
+      "tags": [
+        "erc8183",
+        "delivery",
+        "bnb-chain"
+      ]
+    }
+  ],
+  "url": "https://bnb-lp.172-104-171-139.nip.io/",
+  "version": "1.0.0"
+}
