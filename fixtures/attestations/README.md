@@ -96,6 +96,36 @@ verifyMarketplaceEvaluationAttestation({
 });
 ```
 
+## The 5 valid vectors are not collectively a candidate set
+
+Each valid vector is individually valid. They are **not** a legal comparison set
+when submitted together.
+
+Marketplace Core identifies a candidate by `chainId:tokenId` alone, and rejects
+any evaluation set in which that pair — or a `quoteId` — repeats. Three valid
+vectors are TTL-boundary variants of the *same* quote:
+
+| Vector | Candidate | Quote | In a comparison set? |
+| --- | --- | --- | --- |
+| `baseline` | `56:7` | `quote-a` | yes |
+| `competing-quote-b` | `56:8` | `quote-b` | yes |
+| `competing-quote-c-older-evidence` | `56:9` | `quote-c` | yes |
+| `boundary-max-ttl` | `56:7` | `quote-a` | no — duplicates `baseline` |
+| `boundary-min-ttl` | `56:7` | `quote-a` | no — duplicates `baseline` |
+
+So the largest legal set from these vectors is **3 candidates**, and submitting
+all five yields `DUPLICATE_CANDIDATE`, correctly.
+
+This is a property of the vectors, not a defect to fix: the two boundary vectors
+exist to probe TTL limits on a *single* attestation, which is the right way to
+test a time rule. It is recorded here because `crosscheck.mjs` verifies vectors
+**one at a time** and so cannot surface it — the first set-level consumer
+(`apps/marketplace-api`) hit it as a `422` instead.
+
+Downstream consumers should either take the three-candidate subset above or read
+`comparisonSet` from `GET /v1/fixtures`, which derives it and reports a reason for
+each exclusion.
+
 ## Time anchor
 
 Fixtures are frozen at `issuedAt = 1786900000`, with evidence observed 30s

@@ -1,0 +1,25 @@
+{
+  "name": "@mandatex/marketplace-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public HTTP surface for the MandateX RFQ marketplace. Verifies signed evaluation attestations through Marketplace Core and serves display-safe comparison views. Holds no signing key.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "smoke": "node dist/smoke.js"
+  },
+  "dependencies": {
+    "@mandatex/marketplace-core": "link:../../tools/marketplace-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3"
+  }
+}
