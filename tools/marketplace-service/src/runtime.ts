@@ -1,5 +1,10 @@
 import {
   assertTrustedMarketplaceEvaluationSuccess,
+  computeQuoteSha256,
+  manifestFileSchema,
+  quoteTrustFileSchema,
+  runReportSchema,
+  serializeQuoteTrustFile,
   validateTrustedPreviewForMarketplaceEvaluation,
   type TrustedPreviewMarketplaceEvaluationFailure,
   type ValidateTrustedPreviewForMarketplaceEvaluationOptions,
@@ -9,6 +14,7 @@ import type { MarketplaceAttestationTrust } from "@mandatex/marketplace-core";
 import { MarketplaceServiceError } from "./errors.js";
 import {
   createMarketplaceAttestationSigner,
+  marketplaceVerifierPolicySha256,
   type IssuedMarketplaceEvaluationAttestation,
   type MarketplaceAttestationSignerOptions,
 } from "./issuer.js";
@@ -54,8 +60,20 @@ export interface MarketplaceVerifierRuntimeOptions
 export function createMarketplaceVerifierRuntime(
   options: MarketplaceVerifierRuntimeOptions,
 ): MarketplaceVerifierRuntime {
-  const signer = createMarketplaceAttestationSigner(options);
   const verifier = parseVerifierInvocation(options.verifier);
+  const configuredPolicySha256 = marketplaceVerifierPolicySha256({
+    passivePolicyFingerprint: verifier.passiveReport.policyFingerprint,
+    trustPolicySha256: computeQuoteSha256(
+      serializeQuoteTrustFile(verifier.trustFile),
+    ),
+  });
+  if (configuredPolicySha256 !== options.verifierPolicySha256) {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "the pinned verifier-policy hash does not match the fixed verifier configuration",
+    );
+  }
+  const signer = createMarketplaceAttestationSigner(options);
 
   return Object.freeze({
     get pinnedTrust(): MarketplaceAttestationTrust {
@@ -136,7 +154,7 @@ function parseVerifierInvocation(
     );
   }
   try {
-    assertExactKeys(value, [
+    assertPlainDataObject(value, [
       "manifest",
       "now",
       "passiveReport",
@@ -154,6 +172,20 @@ function parseVerifierInvocation(
         throw new TypeError(`missing verifier configuration: ${requiredKey}`);
       }
     }
+    const manifest = deepFreeze(manifestFileSchema.parse(value.manifest));
+    const passiveReport = deepFreeze(runReportSchema.parse(value.passiveReport));
+    const trustFile = deepFreeze(quoteTrustFileSchema.parse(value.trustFile));
+    const transport = captureTransport(value.transport);
+    const now = captureOptionalFunction(value.now, "now");
+    const randomUUID = captureOptionalFunction(value.randomUUID, "randomUUID");
+    return Object.freeze({
+      manifest,
+      passiveReport,
+      trustFile,
+      transport,
+      ...(now === undefined ? {} : { now }),
+      ...(randomUUID === undefined ? {} : { randomUUID }),
+    });
   } catch (cause) {
     throw new MarketplaceServiceError(
       "VERIFIER_CONFIGURATION_INVALID",
@@ -161,7 +193,6 @@ function parseVerifierInvocation(
       { cause },
     );
   }
-  return value;
 }
 
 function assertExactKeys(
@@ -180,4 +211,70 @@ function assertExactKeys(
       "marketplace verifier invocation contains unsupported fields",
     );
   }
+}
+
+function assertPlainDataObject(
+  value: object,
+  allowedKeys: readonly string[],
+): void {
+  const prototype = Object.getPrototypeOf(value);
+  const keys = Reflect.ownKeys(value);
+  const allowed = new Set(allowedKeys);
+  if (
+    (prototype !== Object.prototype && prototype !== null) ||
+    keys.some((key) => typeof key !== "string" || !allowed.has(key))
+  ) {
+    throw new TypeError("verifier configuration must be a plain exact object");
+  }
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true
+    ) {
+      throw new TypeError(
+        "verifier configuration must contain enumerable data properties only",
+      );
+    }
+  }
+}
+
+function captureTransport(
+  value: MarketplaceVerifierInvocation["transport"],
+): MarketplaceVerifierInvocation["transport"] {
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function") ||
+    typeof value.request !== "function"
+  ) {
+    throw new TypeError("verifier transport must expose a request function");
+  }
+  const receiver = value;
+  const request = value.request;
+  return Object.freeze({
+    request: (route) => request.call(receiver, route),
+  });
+}
+
+function captureOptionalFunction<T extends (...args: never[]) => unknown>(
+  value: T | undefined,
+  label: string,
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "function") {
+    throw new TypeError(`verifier ${label} must be a function`);
+  }
+  return value;
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object") return value;
+  const object = value as object;
+  if (seen.has(object)) return value;
+  seen.add(object);
+  for (const key of Reflect.ownKeys(object)) {
+    deepFreeze((object as Record<PropertyKey, unknown>)[key], seen);
+  }
+  return Object.freeze(value);
 }

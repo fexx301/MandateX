@@ -1,13 +1,13 @@
 import {
   BSC_PANCAKE_V3,
   canonicalQuoteJson,
+  computeQuoteSha256,
   decodeRebalanceTransactionPlan,
   marketplaceDecodedRebalancePlanSchema,
   type MarketplaceDecodedRebalancePlan,
   type PancakeStateSnapshot,
   type TrustedPreviewMarketplaceEvaluationSuccess,
 } from "@mandatex/agent-supply-verifier";
-import { canonicalSha256 } from "@mandatex/marketplace-core";
 
 import { marketplaceVerifierPolicySha256 } from "../src/issuer.js";
 import {
@@ -224,7 +224,7 @@ export function fixtureSuccess(
     currency: CURRENCY,
     estimatedCompletionSeconds: 300,
   };
-  const mandateSha256 = canonicalSha256(request.mandate);
+  const mandateSha256 = verifierCanonicalSha256(request.mandate);
   const quoteEvidence = {
     schema: "mandatex.agent-supply.quote-marketplace-evaluation-evidence.v1" as const,
     observedAt: new Date(ISSUED_AT * 1_000).toISOString(),
@@ -250,7 +250,7 @@ export function fixtureSuccess(
       finalChecks: "pass" as const,
     },
   };
-  const quoteEvidenceSha256 = canonicalSha256(quoteEvidence);
+  const quoteEvidenceSha256 = verifierCanonicalSha256(quoteEvidence);
   const preview = {
     status: "pass" as const,
     gates: {
@@ -294,11 +294,11 @@ export function fixtureSuccess(
     decodedPlanSha256: decoded.decodedPlanSha256,
     decodedPlan: decodedArtifact,
     signedSnapshot: {
-      snapshotSha256: canonicalSha256(signedSnapshot),
+      snapshotSha256: verifierCanonicalSha256(signedSnapshot),
       snapshot: signedSnapshot,
     },
     freshSnapshot: {
-      snapshotSha256: canonicalSha256(freshSnapshot),
+      snapshotSha256: verifierCanonicalSha256(freshSnapshot),
       snapshot: freshSnapshot,
     },
     simulationRequestSha256: preview.simulationRequestSha256,
@@ -321,7 +321,7 @@ export function fixtureSuccess(
     prospectiveReplayKey: "15".repeat(32),
     commitments: {
       quoteEvidenceSha256,
-      previewEvidenceSha256: canonicalSha256(previewEvidence),
+      previewEvidenceSha256: verifierCanonicalSha256(previewEvidence),
     },
     evidence: { quote: quoteEvidence, preview: previewEvidence },
   };
@@ -511,22 +511,26 @@ export function refreshArtifactCommitments(
       };
     };
   };
-  const quoteHash = canonicalSha256(mutable.artifact.evidence.quote as never);
+  const quoteHash = verifierCanonicalSha256(mutable.artifact.evidence.quote);
   mutable.artifact.commitments.quoteEvidenceSha256 = quoteHash;
   mutable.artifact.evidence.preview.quoteEvidenceSha256 = quoteHash;
   mutable.artifact.evidence.preview.signedSnapshot.snapshotSha256 =
-    canonicalSha256(
-      mutable.artifact.evidence.preview.signedSnapshot.snapshot as never,
+    verifierCanonicalSha256(
+      mutable.artifact.evidence.preview.signedSnapshot.snapshot,
     );
   mutable.artifact.evidence.preview.freshSnapshot.snapshotSha256 =
-    canonicalSha256(
-      mutable.artifact.evidence.preview.freshSnapshot.snapshot as never,
+    verifierCanonicalSha256(
+      mutable.artifact.evidence.preview.freshSnapshot.snapshot,
     );
-  mutable.artifact.commitments.previewEvidenceSha256 = canonicalSha256(
-    mutable.artifact.evidence.preview as never,
+  mutable.artifact.commitments.previewEvidenceSha256 = verifierCanonicalSha256(
+    mutable.artifact.evidence.preview,
   );
 }
 
 export function canonicalClone<T>(value: T): T {
   return JSON.parse(canonicalQuoteJson(value as never)) as T;
+}
+
+function verifierCanonicalSha256(value: unknown): string {
+  return computeQuoteSha256(canonicalQuoteJson(value));
 }

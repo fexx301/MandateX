@@ -1,6 +1,8 @@
 export {
   buildDisplaySafeProjectionPayload,
   buildMarketplaceMandate,
+  MARKETPLACE_VERIFIER_POLICY_PROFILES,
+  MARKETPLACE_VERIFIER_POLICY_SCHEMA,
   marketplaceVerifierPolicySha256,
   type IssuedMarketplaceEvaluationAttestation,
   type MarketplaceVerifierPolicyIdentity,

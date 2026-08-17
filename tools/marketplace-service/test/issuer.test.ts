@@ -5,7 +5,10 @@ import test from "node:test";
 import { createMarketplaceCoreV2 } from "@mandatex/marketplace-core";
 
 import { MarketplaceServiceError } from "../src/errors.js";
-import { createMarketplaceAttestationSigner } from "../src/issuer.js";
+import {
+  buildDisplaySafeProjectionPayload,
+  createMarketplaceAttestationSigner,
+} from "../src/issuer.js";
 import { createMarketplaceVerifierRuntime } from "../src/runtime.js";
 import {
   ISSUED_AT,
@@ -14,6 +17,11 @@ import {
   fixtureSuccess,
   refreshArtifactCommitments,
 } from "./fixture.js";
+import {
+  brandedVerifierFixture,
+  verifierInvocationFixture,
+  verifierPolicySha256ForInvocation,
+} from "./verifier-fixture.js";
 
 function signerOptions(overrides: Readonly<Record<string, unknown>> = {}) {
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -32,10 +40,12 @@ function signerOptions(overrides: Readonly<Record<string, unknown>> = {}) {
   };
 }
 
-test("an immediate verifier success signs canonical v2 wire accepted by Core", () => {
-  const signer = createMarketplaceAttestationSigner(signerOptions());
-  const request = fixtureRequest();
-  const issued = signer.issueVerified(request, fixtureSuccess(request));
+test("a genuine verifier success signs decimal and Unicode evidence accepted by Core", async () => {
+  const fixture = await brandedVerifierFixture();
+  const signer = createMarketplaceAttestationSigner(
+    signerOptions({ verifierPolicySha256: fixture.verifierPolicySha256 }),
+  );
+  const issued = signer.issueVerified(fixture.request, fixture.result);
 
   assert.equal(issued.wire.endsWith("\n"), false);
   assert.equal(issued.attestation.scope, "evaluation_only");
@@ -44,7 +54,9 @@ test("an immediate verifier success signs canonical v2 wire accepted by Core", (
   assert.equal(issued.attestation.replayPolicy, "reusable_until_expiry");
   assert.equal(issued.attestation.expiresAt, ISSUED_AT + 300);
   assert.equal(
-    JSON.stringify(issued).includes(request.candidate.transactionPlan.data),
+    JSON.stringify(issued).includes(
+      fixture.request.candidate.transactionPlan.data,
+    ),
     false,
   );
   assert.equal("artifact" in issued, false);
@@ -74,99 +86,109 @@ test("pinned trust returns defensive public-key copies", () => {
   assert.equal(second.publicKeySpkiDer[0], original);
 });
 
-test("recomputed artifact commitments cannot hide divergence from verifier success", () => {
-  const signer = createMarketplaceAttestationSigner(signerOptions());
-  const request = fixtureRequest();
-  const result = structuredClone(fixtureSuccess(request));
-  const mutable = result as unknown as {
-    preview: { snapshot: unknown };
-    artifact: {
-      evidence: {
-        preview: {
-          freshSnapshot: {
-            snapshot: { pool: { currentTick: number } };
-          };
-        };
-      };
-    };
-  };
-  mutable.artifact.evidence.preview.freshSnapshot.snapshot = structuredClone(
-    mutable.preview.snapshot,
-  ) as { pool: { currentTick: number } };
-  mutable.artifact.evidence.preview.freshSnapshot.snapshot.pool.currentTick += 1;
-  refreshArtifactCommitments(result);
-
+test("the signer rejects forged, cloned, and tampered verifier results", async () => {
+  const fixture = await brandedVerifierFixture();
+  const signer = createMarketplaceAttestationSigner(
+    signerOptions({ verifierPolicySha256: fixture.verifierPolicySha256 }),
+  );
+  const cloned = structuredClone(fixture.result);
   assert.throws(
-    () => signer.issueVerified(request, result),
+    () => signer.issueVerified(fixture.request, cloned),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "ARTIFACT_INTEGRITY_INVALID",
+  );
+
+  const divergent = fixture.result as unknown as {
+    preview: { snapshot: { pool: { currentTick: number } } };
+  };
+  divergent.preview.snapshot.pool.currentTick += 1;
+  assert.throws(
+    () => signer.issueVerified(fixture.request, fixture.result),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "ARTIFACT_INTEGRITY_INVALID",
+  );
+
+  const freshFixture = await brandedVerifierFixture();
+  const tampered = structuredClone(
+    freshFixture.result,
+  ) as typeof freshFixture.result;
+  (tampered.artifact as { prospectiveReplayKey: string }).prospectiveReplayKey =
+    "d".repeat(64);
+  assert.throws(
+    () => signer.issueVerified(freshFixture.request, tampered),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
       error.code === "ARTIFACT_INTEGRITY_INVALID",
   );
 });
 
-test("the signer refuses evidence observed after its issuance clock", () => {
-  const signer = createMarketplaceAttestationSigner(signerOptions());
-  const request = fixtureRequest();
-  const result = structuredClone(fixtureSuccess(request));
-  const mutable = result as unknown as {
-    preview: { snapshot: { pin: { observedAt: string } } };
-    artifact: {
-      evidence: {
-        preview: { freshSnapshot: { snapshot: { pin: { observedAt: string } } } };
-      };
-    };
-  };
-  mutable.preview.snapshot.pin.observedAt = (ISSUED_AT + 1).toString();
-  mutable.artifact.evidence.preview.freshSnapshot.snapshot.pin.observedAt =
-    (ISSUED_AT + 1).toString();
-  refreshArtifactCommitments(result);
+test("the signer captures its issuance clock and rejects future evidence", async () => {
+  const fixture = await brandedVerifierFixture();
+  const mutableOptions = signerOptions({
+    verifierPolicySha256: fixture.verifierPolicySha256,
+  });
+  const signer = createMarketplaceAttestationSigner(mutableOptions);
+  mutableOptions.clock = () => ISSUED_AT + 1_000;
+  const issued = signer.issueVerified(fixture.request, fixture.result);
+  assert.equal(issued.attestation.issuedAt, ISSUED_AT);
 
+  const earlySigner = createMarketplaceAttestationSigner(
+    signerOptions({
+      verifierPolicySha256: fixture.verifierPolicySha256,
+      clock: () => ISSUED_AT - 1,
+    }),
+  );
   assert.throws(
-    () => signer.issueVerified(request, result),
+    () => earlySigner.issueVerified(fixture.request, fixture.result),
     (error: unknown) =>
       error instanceof MarketplaceServiceError && error.code === "CLOCK_INVALID",
   );
 });
 
-test("policy mismatch and expired evidence fail before signing", () => {
-  const request = fixtureRequest();
-  const result = fixtureSuccess(request);
+test("policy mismatch and expired evidence fail before signing", async () => {
+  const fixture = await brandedVerifierFixture();
   const wrongPolicySigner = createMarketplaceAttestationSigner(
     signerOptions({ verifierPolicySha256: "cc".repeat(32) }),
   );
   assert.throws(
-    () => wrongPolicySigner.issueVerified(request, result),
+    () => wrongPolicySigner.issueVerified(fixture.request, fixture.result),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
       error.code === "VERIFIER_POLICY_MISMATCH",
   );
 
   const expiredSigner = createMarketplaceAttestationSigner(
-    signerOptions({ clock: () => ISSUED_AT + 601 }),
+    signerOptions({
+      verifierPolicySha256: fixture.verifierPolicySha256,
+      clock: () => ISSUED_AT + 601,
+    }),
   );
   assert.throws(
-    () => expiredSigner.issueVerified(request, result),
+    () => expiredSigner.issueVerified(fixture.request, fixture.result),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
       error.code === "ATTESTATION_EXPIRY_INVALID",
   );
 });
 
-test("candidate and transaction-plan mismatches fail before signing", () => {
-  const signer = createMarketplaceAttestationSigner(signerOptions());
-  const request = fixtureRequest();
-  const result = fixtureSuccess(request);
+test("candidate and transaction-plan mismatches fail before signing", async () => {
+  const fixture = await brandedVerifierFixture();
+  const signer = createMarketplaceAttestationSigner(
+    signerOptions({ verifierPolicySha256: fixture.verifierPolicySha256 }),
+  );
   assert.throws(
     () =>
       signer.issueVerified(
         {
-          ...request,
+          ...fixture.request,
           candidate: {
-            ...request.candidate,
+            ...fixture.request.candidate,
             selector: { chainId: 56, tokenId: "2" },
           },
         },
-        result,
+        fixture.result,
       ),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
@@ -177,16 +199,16 @@ test("candidate and transaction-plan mismatches fail before signing", () => {
     () =>
       signer.issueVerified(
         {
-          ...request,
+          ...fixture.request,
           candidate: {
-            ...request.candidate,
+            ...fixture.request.candidate,
             transactionPlan: {
-              ...request.candidate.transactionPlan,
+              ...fixture.request.candidate.transactionPlan,
               from: "0x2222222222222222222222222222222222222222",
             },
           },
         },
-        result,
+        fixture.result,
       ),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
@@ -195,7 +217,6 @@ test("candidate and transaction-plan mismatches fail before signing", () => {
 });
 
 test("unsafe preview block numbers fail closed during projection mapping", () => {
-  const signer = createMarketplaceAttestationSigner(signerOptions());
   const request = fixtureRequest();
   const result = structuredClone(fixtureSuccess(request));
   const unsafeBlock = (BigInt(Number.MAX_SAFE_INTEGER) + 1n).toString();
@@ -217,7 +238,7 @@ test("unsafe preview block numbers fail closed during projection mapping", () =>
   refreshArtifactCommitments(result);
 
   assert.throws(
-    () => signer.issueVerified(request, result),
+    () => buildDisplaySafeProjectionPayload(request, result),
     (error: unknown) =>
       error instanceof MarketplaceServiceError && error.code === "MAPPING_FAILED",
   );
@@ -225,22 +246,22 @@ test("unsafe preview block numbers fail closed during projection mapping", () =>
 
 test("the public runtime has no generic artifact-signing method", async () => {
   let attestationIds = 0;
-  const runtime = createMarketplaceVerifierRuntime(
-    {
-      ...signerOptions({
-        randomUUID: () => {
-          attestationIds += 1;
-          return "018f4f5e-7d2d-7d6b-8fb8-35c1b79275a1";
-        },
-      }),
-      verifier: {
-        manifest: {},
-        passiveReport: {},
-        transport: {},
-        trustFile: {},
-      } as never,
+  const transport = {
+    async request(): Promise<never> {
+      throw new Error("test transport unavailable");
     },
-  );
+  };
+  const verifier = verifierInvocationFixture(transport);
+  const runtime = createMarketplaceVerifierRuntime({
+    ...signerOptions({
+      verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
+      randomUUID: () => {
+        attestationIds += 1;
+        return "018f4f5e-7d2d-7d6b-8fb8-35c1b79275a1";
+      },
+    }),
+    verifier,
+  });
   assert.equal("issue" in runtime, false);
   assert.equal("issueVerified" in runtime, false);
 
@@ -253,13 +274,102 @@ test("the public runtime has no generic artifact-signing method", async () => {
       error instanceof MarketplaceServiceError && error.code === "REQUEST_INVALID",
   );
 
-  await assert.rejects(
-    runtime.evaluateAndAttest({
-      request: fixtureRequest(),
+  const result = await runtime.evaluateAndAttest({ request: fixtureRequest() });
+  assert.equal(result.outcome, "not_attested");
+  assert.equal(attestationIds, 0);
+});
+
+test("runtime detaches nested verifier configuration and transport methods", async () => {
+  let originalCalls = 0;
+  let replacementCalls = 0;
+  const originalTransport = {
+    async request(): Promise<never> {
+      originalCalls += 1;
+      throw new Error("original transport unavailable");
+    },
+  };
+  const verifier = verifierInvocationFixture(originalTransport);
+  const runtime = createMarketplaceVerifierRuntime({
+    ...signerOptions({
+      verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
     }),
+    verifier,
+  });
+
+  const mutable = verifier as unknown as {
+    manifest: { candidates: Array<{ expectedName: string }> };
+    passiveReport: { candidates: Array<{ expectedName: string }> };
+    trustFile: { candidates: Array<{ quoteEndpoint: string }> };
+    now: () => Date;
+    transport: { request: (route: unknown) => Promise<never> };
+  };
+  mutable.manifest.candidates[0]!.expectedName = "mutated manifest";
+  mutable.passiveReport.candidates[0]!.expectedName = "mutated report";
+  mutable.trustFile.candidates[0]!.quoteEndpoint = "https://evil.example/";
+  mutable.now = () => new Date((ISSUED_AT + 10_000) * 1_000);
+  mutable.transport.request = async () => {
+    replacementCalls += 1;
+    throw new Error("replacement transport must stay unused");
+  };
+
+  const result = await runtime.evaluateAndAttest({ request: fixtureRequest() });
+  assert.equal(result.outcome, "not_attested");
+  assert.equal(originalCalls, 1);
+  assert.equal(replacementCalls, 0);
+});
+
+test("runtime rejects accessor-based verifier configuration", () => {
+  const transport = {
+    async request(): Promise<never> {
+      throw new Error("unused");
+    },
+  };
+  const verifier = verifierInvocationFixture(transport);
+  const accessorVerifier = Object.create(null) as Record<string, unknown>;
+  for (const key of [
+    "now",
+    "passiveReport",
+    "randomUUID",
+    "transport",
+    "trustFile",
+  ]) {
+    Object.defineProperty(accessorVerifier, key, {
+      enumerable: true,
+      value: (verifier as Record<string, unknown>)[key],
+    });
+  }
+  Object.defineProperty(accessorVerifier, "manifest", {
+    enumerable: true,
+    get: () => verifier.manifest,
+  });
+  assert.throws(
+    () =>
+      createMarketplaceVerifierRuntime({
+        ...signerOptions({
+          verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
+        }),
+        verifier: accessorVerifier as never,
+      }),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
-      error.code === "VERIFIER_EVALUATION_FAILED",
+      error.code === "VERIFIER_CONFIGURATION_INVALID",
   );
-  assert.equal(attestationIds, 0);
+});
+
+test("runtime rejects a policy hash that does not match fixed verifier inputs", () => {
+  const verifier = verifierInvocationFixture({
+    async request(): Promise<never> {
+      throw new Error("unused");
+    },
+  });
+  assert.throws(
+    () =>
+      createMarketplaceVerifierRuntime({
+        ...signerOptions({ verifierPolicySha256: "cc".repeat(32) }),
+        verifier,
+      }),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "VERIFIER_CONFIGURATION_INVALID",
+  );
 });

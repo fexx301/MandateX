@@ -8,6 +8,15 @@ import {
 } from "node:crypto";
 
 import {
+  ACTIVE_QUOTE_LIMITS,
+  BSC_PANCAKE_V3,
+  BSC_PREVIEW_RPC_LIMITS,
+  DEFAULT_HTTP_LIMITS,
+  MARKETPLACE_PREVIEW_EVALUATION_SCHEMA,
+  PREVIEW_FINAL_BUFFER_SECONDS,
+  QUOTE_MARKETPLACE_EVALUATION_EVIDENCE_SCHEMA,
+  QUOTE_TRUST_SCHEMA,
+  assertTrustedMarketplaceEvaluationSuccess,
   canonicalQuoteJson,
   computeQuoteSha256,
   decodeRebalanceTransactionPlan,
@@ -56,6 +65,18 @@ export interface MarketplaceVerifierPolicyIdentity {
   readonly trustPolicySha256: string;
 }
 
+export const MARKETPLACE_VERIFIER_POLICY_SCHEMA =
+  "mandatex.marketplace.verifier-policy.v1" as const;
+
+export const MARKETPLACE_VERIFIER_POLICY_PROFILES = Object.freeze({
+  activeQuote: "mandatex.agent-supply.trusted-quote-evaluation.v1",
+  preview: "mandatex.agent-supply.rebalance-preview-policy.v1",
+  canonicalization: "mandatex.agent-supply.canonical-quote-json.v1",
+  chainDeployment: "mandatex.bsc-mainnet.pancakeswap-v3-deployment.v1",
+  transportSecurity: "mandatex.agent-supply.pinned-https-transport.v1",
+  projection: "mandatex.marketplace-service.rebalancing-projection.v1",
+});
+
 export interface IssuedMarketplaceEvaluationAttestation {
   readonly mandate: MarketplaceMandate;
   readonly payload: DisplaySafeQuoteProjectionPayload;
@@ -75,6 +96,7 @@ export function marketplaceVerifierPolicySha256(
   identity: MarketplaceVerifierPolicyIdentity,
 ): string {
   return canonicalSha256({
+    schema: MARKETPLACE_VERIFIER_POLICY_SCHEMA,
     passivePolicyFingerprint: parseSha256(
       identity.passivePolicyFingerprint,
       "passive policy fingerprint",
@@ -83,6 +105,23 @@ export function marketplaceVerifierPolicySha256(
       identity.trustPolicySha256,
       "quote trust policy",
     ),
+    profiles: MARKETPLACE_VERIFIER_POLICY_PROFILES,
+    contracts: {
+      quoteTrust: QUOTE_TRUST_SCHEMA,
+      quoteEvidence: QUOTE_MARKETPLACE_EVALUATION_EVIDENCE_SCHEMA,
+      previewEvaluation: MARKETPLACE_PREVIEW_EVALUATION_SCHEMA,
+    },
+    quotePolicy: {
+      limits: ACTIVE_QUOTE_LIMITS,
+    },
+    previewPolicy: {
+      finalBufferSeconds: PREVIEW_FINAL_BUFFER_SECONDS,
+      rpcLimits: BSC_PREVIEW_RPC_LIMITS,
+    },
+    transportPolicy: {
+      defaultLimits: DEFAULT_HTTP_LIMITS,
+    },
+    chainDeployment: BSC_PANCAKE_V3,
   });
 }
 
@@ -101,7 +140,8 @@ export function createMarketplaceAttestationSigner(
     options.verifierPolicySha256,
     "verifier policy",
   );
-  if (typeof options.clock !== "function") {
+  const clock = options.clock;
+  if (typeof clock !== "function") {
     throw new MarketplaceServiceError(
       "ATTESTATION_SIGNER_INVALID",
       "the verifier-runtime attestation clock must be a function",
@@ -140,6 +180,7 @@ export function createMarketplaceAttestationSigner(
       requestInput: MarketplaceEvaluationRequest,
       result: TrustedPreviewMarketplaceEvaluationSuccess,
     ): IssuedMarketplaceEvaluationAttestation {
+      assertTrustedResult(result);
       const request = parseRequest(requestInput);
       const artifact = parseVerifiedResult(request, result);
       const observedPolicySha256 = marketplaceVerifierPolicySha256({
@@ -156,7 +197,7 @@ export function createMarketplaceAttestationSigner(
 
       const mandate = buildMarketplaceMandate(request);
       const payload = buildDisplaySafeProjectionPayload(request, result);
-      const issuedAt = readClock(options.clock);
+      const issuedAt = readClock(clock);
       assertObservationChronology(payload, issuedAt);
       const expiresAt = Math.min(
         issuedAt + MAX_MARKETPLACE_ATTESTATION_TTL_SECONDS,
@@ -345,6 +386,8 @@ export function buildDisplaySafeProjectionPayload(
       quoteId: artifact.prospectiveReplayKey,
       mandateId: task.mandate.mandate_id,
       category: "rebalancing",
+      // v2 has no separate publisher or reputation feed; owner is the verified
+      // publisher identity and all-zero reputation means unavailable evidence.
       candidate: {
         chainId: 56,
         tokenId: artifact.candidate.tokenId,
@@ -492,15 +535,29 @@ function assertVerifiedResultIntegrity(
   const mandateSha256 = computeQuoteSha256(
     canonicalQuoteJson(request.mandate),
   );
+  const quoteEvidenceSha256 = verifierCanonicalSha256(
+    quote,
+    "quote evidence",
+  );
+  const previewEvidenceSha256 = verifierCanonicalSha256(
+    preview,
+    "preview evidence",
+  );
+  const signedSnapshotSha256 = verifierCanonicalSha256(
+    preview.signedSnapshot.snapshot,
+    "signed snapshot",
+  );
+  const freshSnapshotSha256 = verifierCanonicalSha256(
+    preview.freshSnapshot.snapshot,
+    "fresh snapshot",
+  );
 
   assertArtifact(
-    artifact.commitments.quoteEvidenceSha256 === canonicalSha256(quote) &&
-      artifact.commitments.previewEvidenceSha256 === canonicalSha256(preview) &&
+    artifact.commitments.quoteEvidenceSha256 === quoteEvidenceSha256 &&
+      artifact.commitments.previewEvidenceSha256 === previewEvidenceSha256 &&
       preview.quoteEvidenceSha256 === artifact.commitments.quoteEvidenceSha256 &&
-      preview.signedSnapshot.snapshotSha256 ===
-        canonicalSha256(preview.signedSnapshot.snapshot) &&
-      preview.freshSnapshot.snapshotSha256 ===
-        canonicalSha256(preview.freshSnapshot.snapshot),
+      preview.signedSnapshot.snapshotSha256 === signedSnapshotSha256 &&
+      preview.freshSnapshot.snapshotSha256 === freshSnapshotSha256,
     "marketplace verifier artifact commitments do not match their canonical evidence",
   );
 
@@ -617,6 +674,32 @@ function canonicalEqual(left: unknown, right: unknown): boolean {
     return canonicalQuoteJson(left as never) === canonicalQuoteJson(right as never);
   } catch {
     return false;
+  }
+}
+
+function verifierCanonicalSha256(value: unknown, label: string): string {
+  try {
+    return computeQuoteSha256(canonicalQuoteJson(value));
+  } catch (cause) {
+    throw new MarketplaceServiceError(
+      "ARTIFACT_INTEGRITY_INVALID",
+      `marketplace verifier ${label} is not canonically hashable`,
+      { cause },
+    );
+  }
+}
+
+function assertTrustedResult(
+  result: unknown,
+): asserts result is TrustedPreviewMarketplaceEvaluationSuccess {
+  try {
+    assertTrustedMarketplaceEvaluationSuccess(result);
+  } catch (cause) {
+    throw new MarketplaceServiceError(
+      "ARTIFACT_INTEGRITY_INVALID",
+      "marketplace verifier success lacks trusted in-process provenance",
+      { cause },
+    );
   }
 }
 

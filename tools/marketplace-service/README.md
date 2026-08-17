@@ -26,6 +26,34 @@ hash, then passes the resulting canonical wire string to Marketplace Core v2.
 This package does not authorize activation, reserve replay markers, fund tasks,
 broadcast transactions, or hold wallet authority.
 
+The pinned verifier-policy hash is a versioned Marketplace Core canonical hash
+of the passive policy fingerprint, the complete quote-trust-file digest, the
+quote-trust and preview-evaluation contract identifiers, the active quote
+limits, preview buffer and RPC limits, default transport limits, the BSC
+PancakeSwap V3 deployment profile, and named versions for active quote
+evaluation, preview validation, quote canonicalization, transport security,
+and display projection. Any change to one of those policy inputs requires a
+new hash and a coordinated evaluator repin. Runtime/build identity is outside
+this v1 manifest and is controlled by the deployment boundary.
+
+At construction, manifest, passive-report, and trust-file inputs are parsed
+into detached recursively frozen copies. The transport is retained only as a
+bound request capability, and the clock and UUID functions are captured once;
+later mutation of the bootstrap object cannot replace those capabilities.
+The production installer must supply a transport that conforms to the named
+pinned-HTTPS profile and default limits. The runtime captures that capability's
+identity, but cannot inspect or freeze its internal implementation or mutable
+state; transport conformance therefore remains part of the isolated deployment
+trust boundary.
+
+The rebalancing projection uses the verified current ERC-8004 owner/provider
+as both `owner` and `publisher`; this is an explicit owner-as-publisher
+mapping, not independent publisher evidence. Reputation is currently
+unavailable, so the projection emits `scoreBps: 0`, `sampleSize: 0`, and
+`evidenceConfidenceBps: 0` with the verifier decision time. Marketplace Core
+therefore assigns the minimum reputation contribution and does not infer a
+positive reputation score.
+
 The service clock is authoritative for attestation issuance. Every payload
 observation must be at or before that clock value; clock skew is not used to
 emit a Core-invalid attestation. Attestation lifetime is capped by the frozen
