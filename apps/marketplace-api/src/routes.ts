@@ -55,11 +55,14 @@ async function readBody(request: IncomingMessage, maxBytes: number): Promise<str
   const chunks: Buffer[] = [];
   let total = 0;
 
-  for await (const chunk of request) {
+  // `destroyOnReturn: false` matters. The default async iterator destroys the
+  // request stream when the loop exits early, which tears the socket down before
+  // the 413 can be written — the caller then sees a dropped connection instead of
+  // a status that says what was wrong.
+  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     const buffer = chunk as Buffer;
     total += buffer.length;
     if (total > maxBytes) {
-      request.destroy();
       throw new PayloadTooLarge(maxBytes);
     }
     chunks.push(buffer);
@@ -388,6 +391,9 @@ export function createRouter(config: AppConfig, evaluator: MarketplaceEvaluator)
         raw = await readBody(request, config.maxRequestBytes);
       } catch (cause) {
         if (cause instanceof PayloadTooLarge) {
+          // The unread remainder of the body would wedge keep-alive, so this
+          // response ends the connection rather than trying to drain it.
+          response.setHeader("connection", "close");
           problem(response, 413, "PAYLOAD_TOO_LARGE", cause.message);
           return;
         }

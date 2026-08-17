@@ -1,18 +1,19 @@
-// Server entry point.
+// Verifier server entry point.
 //
-// Railway sends SIGTERM on redeploy and waits before SIGKILL, so shutdown is
-// handled explicitly: stop accepting connections, let in-flight requests finish,
-// then exit. Without this the process is killed mid-request on every deploy,
-// which reads to a judge as an unstable service.
+// Mirrors apps/marketplace-api/src/server.ts, with one addition that matters:
+// nothing here logs the configured environment. The marketplace app can safely
+// log its whole trust configuration because all of it is public; this process
+// cannot, because one of its variables is a signing key. So the boot log names
+// the key by ID and fingerprint only.
 
 import { createServer } from "node:http";
 
 import { ConfigError, loadConfig } from "./config.js";
-import { MarketplaceEvaluator } from "./core.js";
-import { createRouter } from "./routes.js";
+import { armSecretLeakCheck, createRouter, SecretLeak } from "./routes.js";
+import { Verifier } from "./runtime.js";
 
 const SHUTDOWN_GRACE_MS = 10_000;
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function log(level: "info" | "warn" | "error", message: string, fields: Record<string, unknown> = {}): void {
   const line = JSON.stringify({ level, message, ...fields, at: new Date().toISOString() });
@@ -26,41 +27,54 @@ function main(): void {
     config = loadConfig();
   } catch (cause) {
     if (cause instanceof ConfigError) {
-      // A refusal to boot is the intended outcome for a misconfigured trust
-      // boundary, so it gets a clear message rather than a stack trace.
       log("error", "refusing to start", { reason: cause.message });
       process.exit(78); // EX_CONFIG
     }
     throw cause;
   }
 
-  let evaluator: MarketplaceEvaluator;
+  // Arm the response leak check before any route can run.
+  armSecretLeakCheck(config);
+
+  let verifier: Verifier;
   try {
-    evaluator = MarketplaceEvaluator.create(config);
+    verifier = Verifier.create(config);
   } catch (cause) {
-    log("error", "refusing to start: Marketplace Core rejected the pinned trust material", {
+    log("error", "refusing to start: verifier configuration was rejected", {
       reason: (cause as Error).message,
       code: (cause as { code?: string }).code ?? null,
-      hint: "check MANDATEX_TRUST_* against the verifier runtime's advertised key",
     });
     process.exit(78);
   }
 
-  if (config.trustIsDevelopmentKey) {
-    log("warn", "pinned trust is a development key: accepted attestations are forgeable", {
-      keyId: config.trust.keyId,
+  if (config.keyIsDevelopmentKey) {
+    log("warn", "signing with a development key: every attestation issued is forgeable", {
+      keyId: config.keyId,
+    });
+  }
+  if (!verifier.canEvaluate) {
+    log("warn", "no agent configured; POST /v1/evaluate will return 503", {
+      detail: verifier.runtimeDetail,
     });
   }
 
-  const router = createRouter(config, evaluator);
+  const router = createRouter(config, verifier);
 
   const server = createServer((request, response) => {
     void router(request, response).catch((cause: unknown) => {
-      log("error", "unhandled request failure", {
-        method: request.method,
-        url: request.url,
-        reason: (cause as Error).message,
-      });
+      // A blocked leak is logged at error and returns 500 without detail. The
+      // detail is exactly what must not be echoed.
+      if (cause instanceof SecretLeak) {
+        log("error", "BLOCKED a response containing signing key material", {
+          route: cause.route,
+        });
+      } else {
+        log("error", "unhandled request failure", {
+          method: request.method,
+          url: request.url,
+          reason: (cause as Error).message,
+        });
+      }
       if (!response.headersSent) {
         response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: { code: "INTERNAL", detail: "request failed" } }));
@@ -82,9 +96,10 @@ function main(): void {
       host: typeof address === "object" && address !== null ? address.address : config.host,
       port: typeof address === "object" && address !== null ? address.port : config.port,
       production: config.production,
-      trustKeyId: config.trust.keyId,
-      verifierUrl: config.verifierUrl,
-      fixturesExposed: config.exposeFixtures,
+      keyId: config.keyId,
+      publicKeyFingerprintSha256: config.publicKeyFingerprintSha256,
+      canEvaluate: verifier.canEvaluate,
+      verifierPolicySha256: verifier.policySha256,
     });
   });
 

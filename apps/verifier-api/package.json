@@ -1,0 +1,24 @@
+{
+  "name": "@mandatex/verifier-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "smoke": "node dist/smoke.js"
+  },
+  "dependencies": {
+    "@mandatex/agent-supply-verifier": "link:../../tools/agent-supply-verifier",
+    "@mandatex/marketplace-service": "link:../../tools/marketplace-service"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3"
+  }
+}
