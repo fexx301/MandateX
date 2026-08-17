@@ -10,14 +10,15 @@ export {
   type MarketplaceVerifierPolicyManifest,
 } from "./issuer.js";
 export {
-  MARKETPLACE_CATEGORY_DEPLOYMENT_SCHEMA,
-  MARKETPLACE_CATEGORY_VALIDATION_PROFILES,
-  marketplaceCategoryDeploymentEntrySchema,
-  marketplaceCategoryDeploymentManifestSchema,
-  marketplaceCategoryDeploymentSha256,
-  parseMarketplaceCategoryDeploymentManifest,
-  type MarketplaceCategoryDeploymentEntry,
-  type MarketplaceCategoryDeploymentManifest,
+  MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  MARKETPLACE_CATEGORY_ADAPTER_IDS,
+  MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  marketplaceCategoryAdapterDeploymentEntrySchema,
+  marketplaceCategoryAdapterDeploymentManifestSchema,
+  marketplaceCategoryAdapterDeploymentSha256,
+  parseMarketplaceCategoryAdapterDeploymentManifest,
+  type MarketplaceCategoryAdapterDeploymentEntry,
+  type MarketplaceCategoryAdapterDeploymentManifest,
 } from "./category-policy.js";
 export {
   createMarketplaceVerifierRuntime,

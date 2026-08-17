@@ -5,28 +5,34 @@ import { canonicalSha256 } from "@mandatex/marketplace-core";
 
 import { MarketplaceServiceError } from "../src/errors.js";
 import {
-  MARKETPLACE_CATEGORY_DEPLOYMENT_SCHEMA,
-  marketplaceCategoryDeploymentSha256,
+  MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  MARKETPLACE_CATEGORY_ADAPTER_IDS,
+  MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  marketplaceCategoryAdapterDeploymentSha256,
   marketplaceVerifierPolicyManifest,
   marketplaceVerifierPolicySha256,
-  parseMarketplaceCategoryDeploymentManifest,
+  parseMarketplaceCategoryAdapterDeploymentManifest,
 } from "../src/index.js";
 
 const ADDRESS_A = "0x1111111111111111111111111111111111111111";
 const ADDRESS_B = "0x2222222222222222222222222222222222222222";
 const ADDRESS_C = "0x3333333333333333333333333333333333333333";
 const ADDRESS_D = "0x4444444444444444444444444444444444444444";
+const ADDRESS_E = "0x5555555555555555555555555555555555555555";
+const ADDRESS_F = "0x6666666666666666666666666666666666666666";
 
 function gridDeployment() {
   return {
+    adapterId: "pancakeswap-v3-grid-v1" as const,
     category: "grid" as const,
     enabled: true as const,
-    adapterId: "pancakeswap-v3-grid-v1" as const,
     evidenceSchema: "mandatex.category.grid-evidence.v1" as const,
-    validationProfile: "mandatex.marketplace.category-grid-validation.v1" as const,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.grid,
     protocol: "pancakeswap-v3" as const,
     metric: "pool slot0().tick versus the declared grid band" as const,
-    reads: [{ label: "slot0" as const, selector: "0x3850c7bd" as const }],
+    reads: [
+      { label: "slot0" as const, selector: "0x3850c7bd" as const, target: "pool" as const },
+    ],
     configuration: {
       poolAddress: ADDRESS_A,
       lowerTick: -120,
@@ -37,17 +43,25 @@ function gridDeployment() {
 
 function yieldDeployment() {
   return {
+    adapterId: "erc4626-yield-v1" as const,
     category: "yield" as const,
     enabled: true as const,
-    adapterId: "erc4626-yield-v1" as const,
     evidenceSchema: "mandatex.category.yield-evidence.v1" as const,
-    validationProfile: "mandatex.marketplace.category-yield-validation.v1" as const,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.yield,
     protocol: "erc4626" as const,
     metric:
       "totalAssets/totalSupply share price versus a declared floor" as const,
     reads: [
-      { label: "totalAssets" as const, selector: "0x01e1d114" as const },
-      { label: "totalSupply" as const, selector: "0x18160ddd" as const },
+      {
+        label: "totalAssets" as const,
+        selector: "0x01e1d114" as const,
+        target: "vault" as const,
+      },
+      {
+        label: "totalSupply" as const,
+        selector: "0x18160ddd" as const,
+        target: "vault" as const,
+      },
     ],
     configuration: {
       vaultAddress: ADDRESS_B,
@@ -56,19 +70,20 @@ function yieldDeployment() {
   };
 }
 
-function healthDeployment(includeDefault = false) {
+function aaveHealthDeployment(includeDefault = false) {
   return {
+    adapterId: "aave-v3-health-v1" as const,
     category: "health" as const,
     enabled: true as const,
-    adapterId: "aave-v3-health-v1" as const,
     evidenceSchema: "mandatex.category.health-evidence.v1" as const,
-    validationProfile: "mandatex.marketplace.category-health-validation.v1" as const,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.aaveHealth,
     protocol: "aave-v3" as const,
     metric: "getUserAccountData().healthFactor versus a declared floor" as const,
     reads: [
       {
         label: "getUserAccountData" as const,
         selector: "0xbf92857c" as const,
+        target: "pool" as const,
       },
     ],
     configuration: {
@@ -81,19 +96,64 @@ function healthDeployment(includeDefault = false) {
   };
 }
 
-function deploymentManifest(categories: unknown[]) {
+function venusHealthDeployment() {
   return {
-    schema: MARKETPLACE_CATEGORY_DEPLOYMENT_SCHEMA,
-    chainId: 56,
-    categories,
+    adapterId: "venus-health-v1" as const,
+    category: "health" as const,
+    enabled: true as const,
+    evidenceSchema: "mandatex.category.venus-health-evidence.v1" as const,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.venusHealth,
+    protocol: "venus" as const,
+    metric:
+      "getAccountLiquidity() excess liquidity and shortfall plus monitored-market borrowBalanceStored() versus a declared floor" as const,
+    reads: [
+      {
+        label: "getAccountLiquidity" as const,
+        selector: "0x5ec88c79" as const,
+        target: "comptroller" as const,
+      },
+      {
+        label: "getAssetsIn" as const,
+        selector: "0xabfceffc" as const,
+        target: "comptroller" as const,
+      },
+      {
+        label: "borrowBalanceStored" as const,
+        selector: "0x95dd9193" as const,
+        target: "borrowMarket" as const,
+      },
+    ],
+    configuration: {
+      comptrollerAddress: ADDRESS_E,
+      accountAddress: ADDRESS_D,
+      borrowMarketAddress: ADDRESS_F,
+      minLiquidityUsdScaled: "1000000000000000000",
+    },
   };
 }
 
-function disabledDeployment<T extends { configuration?: unknown }>(
+function disabledDeployment<T extends { configuration?: unknown; enabled?: boolean }>(
   entry: T,
-): Omit<T, "configuration"> & { enabled: false } {
-  const { configuration: _configuration, ...metadata } = entry;
+): Omit<T, "configuration" | "enabled"> & { enabled: false } {
+  const { configuration: _configuration, enabled: _enabled, ...metadata } = entry;
   return { ...metadata, enabled: false };
+}
+
+function deploymentManifest(adapters: unknown[]) {
+  return {
+    schema: MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+    chainId: 56,
+    adapters,
+  };
+}
+
+function disabledManifest() {
+  return deploymentManifest([
+    disabledDeployment(venusHealthDeployment()),
+    disabledDeployment(gridDeployment()),
+    disabledDeployment(aaveHealthDeployment(true)),
+    disabledDeployment(yieldDeployment()),
+  ]);
 }
 
 test("the active verifier-policy manifest preserves the locked v1 digest", () => {
@@ -119,12 +179,11 @@ test("the active verifier-policy manifest preserves the locked v1 digest", () =>
     "chainDeployment",
   ]);
   assert.equal(Object.isFrozen(manifest), true);
-  assert.equal(Object.isFrozen(manifest.contracts), true);
   assert.throws(
     () =>
       marketplaceVerifierPolicySha256({
         ...identity,
-        categoryDeploymentSha256: "00".repeat(32),
+        categoryAdapterDeploymentSha256: "00".repeat(32),
       } as never),
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
@@ -132,118 +191,176 @@ test("the active verifier-policy manifest preserves the locked v1 digest", () =>
   );
 });
 
-test("category deployment identity is canonical, explicit, and detached", () => {
+test("adapter deployment identity is canonical, explicit, and detached", () => {
   const input = deploymentManifest([
-    yieldDeployment(),
-    healthDeployment(),
+    disabledDeployment(yieldDeployment()),
+    disabledDeployment(venusHealthDeployment()),
+    aaveHealthDeployment(),
     gridDeployment(),
   ]);
-  const parsed = parseMarketplaceCategoryDeploymentManifest(input);
+  const parsed = parseMarketplaceCategoryAdapterDeploymentManifest(input);
+  assert.equal(parsed.schema, "mandatex.marketplace.category-adapter-deployment.v2");
   assert.deepEqual(
-    parsed.categories.map((entry) => entry.category),
-    ["grid", "health", "yield"],
+    parsed.adapters.map((entry) => entry.adapterId),
+    [...MARKETPLACE_CATEGORY_ADAPTER_IDS],
   );
-  const health = parsed.categories.find((entry) => entry.category === "health");
-  assert.ok(health?.category === "health" && health.configuration !== undefined);
+  assert.deepEqual(
+    parsed.adapters.map((entry) => entry.category),
+    ["health", "yield", "grid", "health"],
+  );
+  const aave = parsed.adapters.find(
+    (entry) => entry.adapterId === "aave-v3-health-v1",
+  );
+  assert.ok(aave?.enabled && aave.configuration !== undefined);
   assert.equal(
-    health.configuration.minHealthFactorScaled,
+    aave.configuration.minHealthFactorScaled,
     "1100000000000000000",
   );
   assert.equal(Object.isFrozen(parsed), true);
-  assert.equal(Object.isFrozen(parsed.categories), true);
-  assert.equal(Object.isFrozen(parsed.categories[0]?.configuration), true);
+  assert.equal(Object.isFrozen(parsed.adapters), true);
+  assert.equal(Object.isFrozen(aave.configuration), true);
 
   const explicitDefault = deploymentManifest([
+    disabledDeployment(yieldDeployment()),
+    disabledDeployment(venusHealthDeployment()),
+    aaveHealthDeployment(true),
     gridDeployment(),
-    healthDeployment(true),
-    yieldDeployment(),
   ]);
   assert.equal(
-    marketplaceCategoryDeploymentSha256(input),
-    marketplaceCategoryDeploymentSha256(explicitDefault),
+    marketplaceCategoryAdapterDeploymentSha256(input),
+    marketplaceCategoryAdapterDeploymentSha256(explicitDefault),
   );
 
-  (input.categories[0] as any).configuration.minSharePriceScaled = "2";
-  const parsedYield = parsed.categories.find((entry) => entry.category === "yield");
-  assert.ok(parsedYield?.category === "yield" && parsedYield.configuration !== undefined);
-  assert.equal(
-    parsedYield.configuration.minSharePriceScaled,
-    "1000000000000000000",
+  (input.adapters[0] as any).enabled = true;
+  const parsedYield = parsed.adapters.find(
+    (entry) => entry.adapterId === "erc4626-yield-v1",
+  );
+  assert.equal(parsedYield?.enabled, false);
+});
+
+test("the closed manifest locks four exact evidence schema strings", () => {
+  const parsed = parseMarketplaceCategoryAdapterDeploymentManifest(disabledManifest());
+  assert.deepEqual(
+    Object.fromEntries(
+      parsed.adapters.map((entry) => [entry.adapterId, entry.evidenceSchema]),
+    ),
+    {
+      "aave-v3-health-v1": "mandatex.category.health-evidence.v1",
+      "erc4626-yield-v1": "mandatex.category.yield-evidence.v1",
+      "pancakeswap-v3-grid-v1": "mandatex.category.grid-evidence.v1",
+      "venus-health-v1": "mandatex.category.venus-health-evidence.v1",
+    },
   );
 });
 
-test("every deployment address and threshold is committed by the category hash", () => {
-  const base = deploymentManifest([
+test("every enabled deployment address and threshold is committed by the hash", () => {
+  const aaveBase = deploymentManifest([
     gridDeployment(),
-    healthDeployment(true),
     yieldDeployment(),
+    aaveHealthDeployment(true),
+    disabledDeployment(venusHealthDeployment()),
   ]);
-  const baseline = marketplaceCategoryDeploymentSha256(base);
-  const variants = [
+  const aaveBaseline = marketplaceCategoryAdapterDeploymentSha256(aaveBase);
+  const aaveVariants = [
     () => {
-      const value = structuredClone(base) as any;
-      value.categories[0].configuration.poolAddress = ADDRESS_D;
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[0].configuration.poolAddress = ADDRESS_F;
       return value;
     },
     () => {
-      const value = structuredClone(base) as any;
-      value.categories[0].configuration.lowerTick = -121;
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[0].configuration.lowerTick = -121;
       return value;
     },
     () => {
-      const value = structuredClone(base) as any;
-      value.categories[1].configuration.accountAddress = ADDRESS_A;
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[1].configuration.vaultAddress = ADDRESS_E;
       return value;
     },
     () => {
-      const value = structuredClone(base) as any;
-      value.categories[1].configuration.minHealthFactorScaled =
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[1].configuration.minSharePriceScaled = "1000000000000000001";
+      return value;
+    },
+    () => {
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[2].configuration.accountAddress = ADDRESS_A;
+      return value;
+    },
+    () => {
+      const value = structuredClone(aaveBase) as any;
+      value.adapters[2].configuration.minHealthFactorScaled =
         "1200000000000000000";
       return value;
     },
-    () => {
-      const value = structuredClone(base) as any;
-      value.categories[2].configuration.vaultAddress = ADDRESS_C;
-      return value;
-    },
-    () => {
-      const value = structuredClone(base) as any;
-      value.categories[2].configuration.minSharePriceScaled =
-        "1000000000000000001";
-      return value;
-    },
   ];
-  for (const variant of variants) {
-    assert.notEqual(marketplaceCategoryDeploymentSha256(variant()), baseline);
+  for (const variant of aaveVariants) {
+    assert.notEqual(
+      marketplaceCategoryAdapterDeploymentSha256(variant()),
+      aaveBaseline,
+    );
+  }
+
+  const venusBase = deploymentManifest([
+    disabledDeployment(gridDeployment()),
+    disabledDeployment(yieldDeployment()),
+    disabledDeployment(aaveHealthDeployment(true)),
+    venusHealthDeployment(),
+  ]);
+  const venusBaseline = marketplaceCategoryAdapterDeploymentSha256(venusBase);
+  for (const mutate of [
+    (configuration: any) => {
+      configuration.comptrollerAddress = ADDRESS_A;
+    },
+    (configuration: any) => {
+      configuration.accountAddress = ADDRESS_B;
+    },
+    (configuration: any) => {
+      configuration.borrowMarketAddress = ADDRESS_C;
+    },
+    (configuration: any) => {
+      configuration.minLiquidityUsdScaled = "1000000000000000001";
+    },
+  ]) {
+    const value = structuredClone(venusBase) as any;
+    mutate(value.adapters[3].configuration);
+    assert.notEqual(
+      marketplaceCategoryAdapterDeploymentSha256(value),
+      venusBaseline,
+    );
   }
 });
 
-test("category deployment parsing rejects unsafe or ambiguous policy data", () => {
+test("adapter deployment parsing rejects incomplete or ambiguous policy", () => {
   const valid = deploymentManifest([
     gridDeployment(),
-    healthDeployment(true),
     yieldDeployment(),
+    aaveHealthDeployment(true),
+    disabledDeployment(venusHealthDeployment()),
   ]);
-  const gridMissingConfiguration = disabledDeployment(gridDeployment()) as any;
-  gridMissingConfiguration.enabled = true;
+  const missingGridConfiguration = disabledDeployment(gridDeployment()) as any;
+  missingGridConfiguration.enabled = true;
   const invalid = [
     deploymentManifest([]),
-    deploymentManifest([gridDeployment(), gridDeployment(), yieldDeployment()]),
-    deploymentManifest([gridDeployment(), healthDeployment(true)]),
+    deploymentManifest([
+      gridDeployment(),
+      gridDeployment(),
+      aaveHealthDeployment(true),
+      disabledDeployment(venusHealthDeployment()),
+    ]),
+    deploymentManifest([
+      gridDeployment(),
+      yieldDeployment(),
+      aaveHealthDeployment(true),
+    ]),
     {
-      ...valid,
-      categories: [
-        {
-          ...gridDeployment(),
-          adapterId: "aave-v3-health-v1",
-        },
-        healthDeployment(true),
-        yieldDeployment(),
-      ],
+      schema: "mandatex.marketplace.category-deployment.v1",
+      chainId: 56,
+      categories: [],
     },
     {
       ...valid,
-      categories: [
+      adapters: [
         {
           ...gridDeployment(),
           configuration: {
@@ -251,35 +368,31 @@ test("category deployment parsing rejects unsafe or ambiguous policy data", () =
             poolAddress: ADDRESS_A.toUpperCase(),
           },
         },
-        healthDeployment(true),
         yieldDeployment(),
+        aaveHealthDeployment(true),
+        disabledDeployment(venusHealthDeployment()),
       ],
     },
     {
       ...valid,
-      categories: [
+      adapters: [
         { ...gridDeployment(), enabled: false },
-        healthDeployment(true),
         yieldDeployment(),
-      ],
-    },
-    {
-      ...valid,
-      categories: [
-        {
-          ...gridDeployment(),
-          configuration: {
-            ...gridDeployment().configuration,
-            lowerTick: -887_273,
-          },
-        },
-        healthDeployment(true),
-        yieldDeployment(),
+        aaveHealthDeployment(true),
+        disabledDeployment(venusHealthDeployment()),
       ],
     },
     deploymentManifest([
+      {
+        ...gridDeployment(),
+        configuration: { ...gridDeployment().configuration, lowerTick: -887_273 },
+      },
+      yieldDeployment(),
+      aaveHealthDeployment(true),
+      disabledDeployment(venusHealthDeployment()),
+    ]),
+    deploymentManifest([
       gridDeployment(),
-      healthDeployment(true),
       {
         ...yieldDeployment(),
         configuration: {
@@ -287,27 +400,68 @@ test("category deployment parsing rejects unsafe or ambiguous policy data", () =
           minSharePriceScaled: (1n << 256n).toString(10),
         },
       },
+      aaveHealthDeployment(true),
+      disabledDeployment(venusHealthDeployment()),
     ]),
     deploymentManifest([
-      gridMissingConfiguration,
-      healthDeployment(true),
-      yieldDeployment(),
+      missingGridConfiguration,
+      disabledDeployment(yieldDeployment()),
+      disabledDeployment(aaveHealthDeployment(true)),
+      disabledDeployment(venusHealthDeployment()),
+    ]),
+    deploymentManifest([
+      disabledDeployment(gridDeployment()),
+      disabledDeployment(yieldDeployment()),
+      {
+        ...disabledDeployment(aaveHealthDeployment(true)),
+        configuration: undefined,
+      },
+      disabledDeployment(venusHealthDeployment()),
+    ]),
+    deploymentManifest([
+      disabledDeployment(gridDeployment()),
+      disabledDeployment(yieldDeployment()),
+      aaveHealthDeployment(true),
+      venusHealthDeployment(),
+    ]),
+    deploymentManifest([
+      disabledDeployment(gridDeployment()),
+      disabledDeployment(yieldDeployment()),
+      disabledDeployment(aaveHealthDeployment(true)),
+      {
+        ...venusHealthDeployment(),
+        configuration: {
+          comptrollerAddress: ADDRESS_E,
+          accountAddress: ADDRESS_D,
+          minLiquidityUsdScaled: "1000000000000000000",
+        },
+      },
+    ]),
+    deploymentManifest([
+      disabledDeployment(gridDeployment()),
+      disabledDeployment(yieldDeployment()),
+      disabledDeployment(aaveHealthDeployment(true)),
+      {
+        ...venusHealthDeployment(),
+        configuration: {
+          comptrollerAddress: ADDRESS_E,
+          accountAddress: ADDRESS_D,
+          borrowMarketAddress: ADDRESS_F,
+        },
+      },
     ]),
     { ...valid, extra: true },
   ];
   for (const value of invalid) {
-    assert.throws(() => parseMarketplaceCategoryDeploymentManifest(value));
+    assert.throws(() => parseMarketplaceCategoryAdapterDeploymentManifest(value));
   }
 
-  const disabled = deploymentManifest([
-    disabledDeployment(gridDeployment()),
-    disabledDeployment(healthDeployment(true)),
-    disabledDeployment(yieldDeployment()),
-  ]);
-  const parsedDisabled = parseMarketplaceCategoryDeploymentManifest(disabled);
-  assert.equal(parsedDisabled.categories.every((entry) => !entry.enabled), true);
+  const parsedDisabled = parseMarketplaceCategoryAdapterDeploymentManifest(
+    disabledManifest(),
+  );
+  assert.equal(parsedDisabled.adapters.every((entry) => !entry.enabled), true);
   assert.equal(
-    parsedDisabled.categories.some((entry) => Object.hasOwn(entry, "configuration")),
+    parsedDisabled.adapters.some((entry) => Object.hasOwn(entry, "configuration")),
     false,
   );
 });

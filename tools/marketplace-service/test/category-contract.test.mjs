@@ -7,18 +7,26 @@ import {
   GRID_EVIDENCE_SCHEMA,
   HEALTH_ADAPTER_ID,
   HEALTH_EVIDENCE_SCHEMA,
+  SELECTOR_BORROW_BALANCE_STORED,
+  SELECTOR_GET_ACCOUNT_LIQUIDITY,
+  SELECTOR_GET_ASSETS_IN,
   SELECTOR_GET_USER_ACCOUNT_DATA,
   SELECTOR_SLOT0,
   SELECTOR_TOTAL_ASSETS,
   SELECTOR_TOTAL_SUPPLY,
+  VENUS_HEALTH_ADAPTER_ID,
+  VENUS_HEALTH_EVIDENCE_SCHEMA,
   V3_MAX_TICK,
   V3_MIN_TICK,
   YIELD_ADAPTER_ID,
   YIELD_EVIDENCE_SCHEMA,
+  venusHealthAdapterConfigSchema,
 } from "../../category-adapters/dist/policy.js";
 import {
-  marketplaceCategoryDeploymentSha256,
-  parseMarketplaceCategoryDeploymentManifest,
+  MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  marketplaceCategoryAdapterDeploymentSha256,
+  parseMarketplaceCategoryAdapterDeploymentManifest,
 } from "../src/category-policy.ts";
 
 const addresses = {
@@ -26,129 +34,170 @@ const addresses = {
   yield: "0x2222222222222222222222222222222222222222",
   healthPool: "0x3333333333333333333333333333333333333333",
   healthAccount: "0x4444444444444444444444444444444444444444",
+  venusComptroller: "0x5555555555555555555555555555555555555555",
+  venusBorrowMarket: "0x6666666666666666666666666666666666666666",
 };
 
-const manifest = {
-  schema: "mandatex.marketplace.category-deployment.v1",
+const descriptors = [
+  {
+    adapterId: GRID_ADAPTER_ID,
+    category: "grid",
+    evidenceSchema: GRID_EVIDENCE_SCHEMA,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.grid,
+    protocol: "pancakeswap-v3",
+    metric: "pool slot0().tick versus the declared grid band",
+    reads: [{ label: "slot0", selector: SELECTOR_SLOT0, target: "pool" }],
+  },
+  {
+    adapterId: YIELD_ADAPTER_ID,
+    category: "yield",
+    evidenceSchema: YIELD_EVIDENCE_SCHEMA,
+    validationProfile: MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.yield,
+    protocol: "erc4626",
+    metric: "totalAssets/totalSupply share price versus a declared floor",
+    reads: [
+      { label: "totalAssets", selector: SELECTOR_TOTAL_ASSETS, target: "vault" },
+      { label: "totalSupply", selector: SELECTOR_TOTAL_SUPPLY, target: "vault" },
+    ],
+  },
+  {
+    adapterId: HEALTH_ADAPTER_ID,
+    category: "health",
+    evidenceSchema: HEALTH_EVIDENCE_SCHEMA,
+    validationProfile:
+      MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.aaveHealth,
+    protocol: "aave-v3",
+    metric: "getUserAccountData().healthFactor versus a declared floor",
+    reads: [
+      {
+        label: "getUserAccountData",
+        selector: SELECTOR_GET_USER_ACCOUNT_DATA,
+        target: "pool",
+      },
+    ],
+  },
+  {
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+    category: "health",
+    evidenceSchema: VENUS_HEALTH_EVIDENCE_SCHEMA,
+    validationProfile:
+      MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES.venusHealth,
+    protocol: "venus",
+    metric:
+      "getAccountLiquidity() excess liquidity and shortfall plus monitored-market borrowBalanceStored() versus a declared floor",
+    reads: [
+      {
+        label: "getAccountLiquidity",
+        selector: SELECTOR_GET_ACCOUNT_LIQUIDITY,
+        target: "comptroller",
+      },
+      { label: "getAssetsIn", selector: SELECTOR_GET_ASSETS_IN, target: "comptroller" },
+      {
+        label: "borrowBalanceStored",
+        selector: SELECTOR_BORROW_BALANCE_STORED,
+        target: "borrowMarket",
+      },
+    ],
+  },
+];
+
+const disabledManifest = {
+  schema: MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
   chainId: 56,
-  categories: [
-    {
-      category: "grid",
-      enabled: true,
-      adapterId: GRID_ADAPTER_ID,
-      evidenceSchema: GRID_EVIDENCE_SCHEMA,
-      validationProfile: "mandatex.marketplace.category-grid-validation.v1",
-      protocol: "pancakeswap-v3",
-      metric: "pool slot0().tick versus the declared grid band",
-      reads: [{ label: "slot0", selector: SELECTOR_SLOT0 }],
-      configuration: {
-        poolAddress: addresses.grid,
-        lowerTick: V3_MIN_TICK,
-        upperTick: V3_MAX_TICK,
-      },
-    },
-    {
-      category: "yield",
-      enabled: true,
-      adapterId: YIELD_ADAPTER_ID,
-      evidenceSchema: YIELD_EVIDENCE_SCHEMA,
-      validationProfile: "mandatex.marketplace.category-yield-validation.v1",
-      protocol: "erc4626",
-      metric: "totalAssets/totalSupply share price versus a declared floor",
-      reads: [
-        { label: "totalAssets", selector: SELECTOR_TOTAL_ASSETS },
-        { label: "totalSupply", selector: SELECTOR_TOTAL_SUPPLY },
-      ],
-      configuration: {
-        vaultAddress: addresses.yield,
-        minSharePriceScaled: "1000000000000000000",
-      },
-    },
-    {
-      category: "health",
-      enabled: true,
-      adapterId: HEALTH_ADAPTER_ID,
-      evidenceSchema: HEALTH_EVIDENCE_SCHEMA,
-      validationProfile: "mandatex.marketplace.category-health-validation.v1",
-      protocol: "aave-v3",
-      metric: "getUserAccountData().healthFactor versus a declared floor",
-      reads: [
-        {
-          label: "getUserAccountData",
-          selector: SELECTOR_GET_USER_ACCOUNT_DATA,
-        },
-      ],
-      configuration: {
-        poolAddress: addresses.healthPool,
-        accountAddress: addresses.healthAccount,
-      },
-    },
-  ],
+  adapters: descriptors.map((entry) => ({ ...entry, enabled: false })),
 };
 
-export { manifest };
-
-const parsed = parseMarketplaceCategoryDeploymentManifest(manifest);
+const parsed = parseMarketplaceCategoryAdapterDeploymentManifest(disabledManifest);
 assert.deepEqual(
-  parsed.categories.map((entry) => entry.category),
-  ["grid", "health", "yield"],
+  parsed.adapters.map((entry) => entry.adapterId),
+  [
+    HEALTH_ADAPTER_ID,
+    YIELD_ADAPTER_ID,
+    GRID_ADAPTER_ID,
+    VENUS_HEALTH_ADAPTER_ID,
+  ],
 );
-assert.equal(
-  parsed.categories.find((entry) => entry.category === "health")?.configuration
-    .minHealthFactorScaled,
-  DEFAULT_MIN_HEALTH_FACTOR_SCALED,
-);
-assert.equal(
-  marketplaceCategoryDeploymentSha256(manifest),
-  "b2a8aae6a012c687bee16f36a6499d5596293c0f4267a0238216098768b462c1",
+assert.deepEqual(
+  Object.fromEntries(
+    parsed.adapters.map((entry) => [entry.adapterId, entry.evidenceSchema]),
+  ),
+  {
+    [GRID_ADAPTER_ID]: GRID_EVIDENCE_SCHEMA,
+    [YIELD_ADAPTER_ID]: YIELD_EVIDENCE_SCHEMA,
+    [HEALTH_ADAPTER_ID]: HEALTH_EVIDENCE_SCHEMA,
+    [VENUS_HEALTH_ADAPTER_ID]: VENUS_HEALTH_EVIDENCE_SCHEMA,
+  },
 );
 
 for (const registryEntry of CATEGORY_ADAPTER_REGISTRY) {
-  const entry = parsed.categories.find(
-    (candidate) => candidate.category === registryEntry.category,
+  const expected = descriptors.find(
+    (candidate) => candidate.adapterId === registryEntry.adapterId,
   );
-  assert.ok(entry);
-  assert.equal(entry.adapterId, registryEntry.adapterId);
-  assert.equal(entry.evidenceSchema, registryEntry.evidenceSchema);
-  assert.equal(entry.protocol, registryEntry.protocol);
-  assert.equal(entry.metric, registryEntry.metric);
-  assert.equal(entry.reads.length, registryEntry.reads);
+  const serviceEntry = parsed.adapters.find(
+    (candidate) => candidate.adapterId === registryEntry.adapterId,
+  );
+  assert.ok(expected, `unrecognized adapter registry ID: ${registryEntry.adapterId}`);
+  assert.ok(serviceEntry, `service manifest omitted: ${registryEntry.adapterId}`);
+  assert.equal(serviceEntry.category, registryEntry.category);
+  assert.equal(serviceEntry.evidenceSchema, registryEntry.evidenceSchema);
+  assert.equal(serviceEntry.protocol, registryEntry.protocol);
+  assert.equal(serviceEntry.metric, registryEntry.metric);
+  assert.equal(serviceEntry.reads.length, registryEntry.reads);
+  assert.deepEqual(serviceEntry.reads, expected.reads);
 }
+assert.equal(CATEGORY_ADAPTER_REGISTRY.length, descriptors.length);
 
-assert.notEqual(
-  marketplaceCategoryDeploymentSha256(manifest),
-  marketplaceCategoryDeploymentSha256({
-    ...manifest,
-    categories: manifest.categories.map((entry) =>
-      entry.category === "health"
-        ? {
-            ...entry,
-            configuration: {
-              ...entry.configuration,
-              minHealthFactorScaled: "1100000000000000001",
-            },
-          }
-        : entry,
-    ),
-  }),
-);
-
-const disabledManifest = {
-  ...manifest,
-  categories: manifest.categories.map(({ configuration: _configuration, ...entry }) => ({
-    ...entry,
-    enabled: false,
-  })),
-};
-assert.equal(
-  parseMarketplaceCategoryDeploymentManifest(disabledManifest).categories.every(
-    (entry) => !entry.enabled,
+const aaveEnabled = {
+  ...disabledManifest,
+  adapters: disabledManifest.adapters.map((entry) =>
+    entry.adapterId === HEALTH_ADAPTER_ID
+      ? {
+          ...entry,
+          enabled: true,
+          configuration: {
+            poolAddress: addresses.healthPool,
+            accountAddress: addresses.healthAccount,
+          },
+        }
+      : entry,
   ),
-  true,
+};
+const parsedAave = parseMarketplaceCategoryAdapterDeploymentManifest(aaveEnabled);
+assert.equal(
+  parsedAave.adapters.find((entry) => entry.adapterId === HEALTH_ADAPTER_ID)
+    ?.configuration.minHealthFactorScaled,
+  DEFAULT_MIN_HEALTH_FACTOR_SCALED,
 );
+
+const venusConfig = {
+  adapterId: VENUS_HEALTH_ADAPTER_ID,
+  protocol: "venus",
+  comptrollerAddress: addresses.venusComptroller,
+  accountAddress: addresses.healthAccount,
+  borrowMarketAddress: addresses.venusBorrowMarket,
+  minLiquidityUsdScaled: "1000000000000000000",
+};
+assert.equal(venusHealthAdapterConfigSchema.parse(venusConfig).borrowMarketAddress, addresses.venusBorrowMarket);
+assert.equal(
+  venusHealthAdapterConfigSchema.safeParse(
+    Object.fromEntries(
+      Object.entries(venusConfig).filter(([key]) => key !== "borrowMarketAddress"),
+    ),
+  ).success,
+  false,
+);
+
+const venusEnabled = {
+  ...disabledManifest,
+  adapters: disabledManifest.adapters.map((entry) =>
+    entry.adapterId === VENUS_HEALTH_ADAPTER_ID
+      ? { ...entry, enabled: true, configuration: venusConfig }
+      : entry,
+  ),
+};
 assert.notEqual(
-  marketplaceCategoryDeploymentSha256(manifest),
-  marketplaceCategoryDeploymentSha256(disabledManifest),
+  marketplaceCategoryAdapterDeploymentSha256(disabledManifest),
+  marketplaceCategoryAdapterDeploymentSha256(venusEnabled),
 );
 
 console.log("category adapter/service policy conformance: passed");

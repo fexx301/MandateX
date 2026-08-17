@@ -37,26 +37,35 @@ new hash and a coordinated evaluator repin. Runtime/build identity is outside
 this v1 manifest and is controlled by the deployment boundary.
 
 `marketplaceVerifierPolicyManifest()` exposes the exact object hashed by that
-active v1 policy, and its locked digest remains unchanged. Category deployment
-identity is intentionally separate for now:
-`parseMarketplaceCategoryDeploymentManifest()` validates and freezes a strict
-manifest, while `marketplaceCategoryDeploymentSha256()` hashes the normalized
-addresses, thresholds, adapter and evidence identifiers, validation profiles,
-and read selectors. These helpers do not add category data to the active policy,
-do not run adapters, and do not enable grid, yield, or health. Activation still
-requires verifier-side evidence integration, binding that deployment identity
-into trusted result provenance, a new active policy digest, and a coordinated
+active v1 policy, and its locked digest remains unchanged. Category-adapter
+deployment identity is intentionally separate for now:
+`parseMarketplaceCategoryAdapterDeploymentManifest()` validates and freezes a
+strict v2 manifest, while `marketplaceCategoryAdapterDeploymentSha256()` hashes
+the normalized addresses, thresholds, adapter and evidence identifiers,
+adapter-specific validation profiles, and exact ordered read selectors. The
+manifest is keyed by adapter ID and contains exactly four entries: grid, yield,
+Aave health, and Venus health. It does not add category data to the active
+policy, run adapters, or enable any category. Activation still requires
+verifier-side evidence integration, binding the selected adapter identity into
+trusted result provenance, a new active policy digest, and a coordinated
 signer/evaluator repin.
 
-The category manifest is closed-world: it contains exactly one explicit entry
-for each of `grid`, `health`, and `yield`. `enabled: false` entries omit
-configuration and are hashed as disabled; omission is never treated as a
-default. A development-only conformance check compares the mirrored IDs,
-evidence schemas, selectors, read counts, and health default with the standalone
-adapter package without adding that package to the signing runtime.
-Run it separately with `corepack pnpm run test:category-contract` after the
-adapter package parses and builds; it is intentionally kept outside the core
-unit-test command because that package is a separate ownership boundary.
+`enabled: false` entries omit configuration and are hashed as disabled; omission
+is never treated as a default. At most one adapter may be enabled for a category
+in this generation because the current mandate and signed category projection
+carry only `category`, not an adapter selector. Aave and Venus therefore cannot
+be enabled together until a future provenance contract carries that choice.
+Venus requires `comptrollerAddress`, `accountAddress`,
+`borrowMarketAddress`, and `minLiquidityUsdScaled`; there is no absolute-liquidity
+default. The Venus metric metadata explicitly includes the monitored-market
+`borrowBalanceStored()` witness; a zero balance is unknown for that monitored
+market, not proof that the account has no debt anywhere. A development-only
+conformance check compares every adapter by ID,
+including evidence schema, protocol, profile, metric, and exact read descriptors,
+with the standalone adapter package without adding that package to the signing
+runtime. Run it separately with `corepack pnpm run test:category-contract` after
+the adapter package parses and builds; it remains outside the core unit-test
+command because that package is a separate ownership boundary.
 
 At construction, manifest, passive-report, and trust-file inputs are parsed
 into detached recursively frozen copies. The transport is retained only as a
