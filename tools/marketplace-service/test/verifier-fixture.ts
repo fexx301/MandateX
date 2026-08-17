@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 
-import { encodeFunctionResult, type Hex } from "viem";
+import {
+  encodeAbiParameters,
+  encodeFunctionResult,
+  parseAbiParameters,
+  type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import {
+  BSC_PANCAKE_V3,
   DEFAULT_CHAIN_PROFILE,
   POLICY_FINGERPRINT,
   QUOTE_TRUST_SCHEMA,
@@ -22,6 +28,7 @@ import {
   quoteMandatexSignedRebalanceTaskSchema,
   quoteTrustFileSchema,
   serializeQuoteTrustFile,
+  validateTransportRoute,
   validateTrustedPreviewForMarketplaceEvaluation,
   type BoundedHttpResponse,
   type CandidateReportInput,
@@ -41,7 +48,11 @@ import {
 import {
   CURRENCY,
   ISSUED_AT,
+  POOL,
+  POSITION_MANAGER,
   PROVIDER,
+  TOKEN0,
+  TOKEN1,
   fixtureRequest,
   fixtureSuccess,
 } from "./fixture.js";
@@ -51,12 +62,25 @@ const TEST_ACCOUNT = privateKeyToAccount(TEST_PRIVATE_KEY);
 const BLOCK_HASH = `0x${"a".repeat(64)}`;
 const CODE_HASH = "b".repeat(64);
 const RESPONSE_HASH = "c".repeat(64);
+const SIGNED_BLOCK_HASH = `0x${"d".repeat(64)}`;
+const FRESH_BLOCK_HASH = `0x${"f".repeat(64)}`;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+export const DEFAULT_SIGNED_BLOCK_HASH = SIGNED_BLOCK_HASH;
+export const DEFAULT_FRESH_BLOCK_HASH = FRESH_BLOCK_HASH;
 
 export interface BrandedVerifierFixture {
   readonly request: MarketplaceEvaluationRequest;
   readonly result: TrustedPreviewMarketplaceEvaluationSuccess;
   readonly verifier: MarketplaceVerifierInvocation;
   readonly verifierPolicySha256: string;
+}
+
+export interface DefaultRuntimeFixture {
+  readonly request: MarketplaceEvaluationRequest;
+  readonly verifier: MarketplaceVerifierInvocation;
+  readonly verifierPolicySha256: string;
+  readonly routes: readonly TransportRoute[];
 }
 
 export function decimalUnicodeRequest(): MarketplaceEvaluationRequest {
@@ -196,6 +220,21 @@ export async function brandedVerifierFixture(): Promise<BrandedVerifierFixture> 
     result,
     verifier,
     verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
+  };
+}
+
+export async function defaultRuntimeFixture(): Promise<DefaultRuntimeFixture> {
+  const request = decimalUnicodeRequest();
+  const envelope = await signedEnvelope(request);
+  const routes: TransportRoute[] = [];
+  const verifier = verifierInvocationFixture(
+    defaultPathTransport(routes, envelope),
+  );
+  return {
+    request,
+    verifier,
+    verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
+    routes,
   };
 }
 
@@ -378,20 +417,172 @@ function quoteTransport(
         throw new Error(`unexpected route ${route.kind}`);
       }
       const request = JSON.parse(route.body) as { id: string };
-      const body = Buffer.from(JSON.stringify(respond(request.id)));
-      return {
-        status: 200,
-        contentType: "application/json",
-        retryAfter: null,
-        rateLimitRemaining: null,
-        body,
-        responseSha256: createHash("sha256").update(body).digest("hex"),
-        resolvedAddress: "93.184.216.34",
-        startedAt: new Date(ISSUED_AT * 1_000).toISOString(),
-        finishedAt: new Date(ISSUED_AT * 1_000 + 10).toISOString(),
-        latencyMs: 10,
-      };
+      return boundedJsonResponse(respond(request.id));
     },
+  };
+}
+
+function defaultPathTransport(
+  routes: TransportRoute[],
+  envelope: QuoteAcceptedEnvelope,
+): MarketplaceVerifierInvocation["transport"] {
+  return {
+    async request(route: TransportRoute): Promise<BoundedHttpResponse> {
+      validateTransportRoute(route);
+      routes.push(route);
+      if (route.kind === "a2a-quote") {
+        const request = JSON.parse(route.body) as { id: string };
+        return boundedJsonResponse(successA2aResponse(request.id, envelope));
+      }
+      if (route.kind !== "bsc-preview-rpc") {
+        throw new Error(`unexpected default-path route ${route.kind}`);
+      }
+
+      const request = JSON.parse(route.body) as {
+        id: string;
+        method: string;
+        params: unknown[];
+      };
+      return boundedJsonResponse({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: previewRpcResult(route.purpose, request),
+      });
+    },
+  };
+}
+
+function previewRpcResult(
+  purpose: Extract<TransportRoute, { kind: "bsc-preview-rpc" }>["purpose"],
+  request: { readonly method: string; readonly params: readonly unknown[] },
+): unknown {
+  switch (purpose) {
+    case "chain-id":
+      return "0x38";
+    case "head-block-number":
+      return "0x69";
+    case "block-header":
+      return blockHeader(request.params[0]);
+    case "contract-code":
+      return request.params[0] === PROVIDER ? "0x" : "0x60006000";
+    case "state-read":
+      return stateReadResult(request);
+    case "simulation":
+      return previewSimulationResult();
+  }
+}
+
+function blockHeader(blockNumber: unknown): unknown {
+  if (blockNumber === "0x64") {
+    return {
+      number: blockNumber,
+      hash: SIGNED_BLOCK_HASH,
+      timestamp: `0x${(ISSUED_AT - 20).toString(16)}`,
+    };
+  }
+  if (blockNumber === "0x67") {
+    return {
+      number: blockNumber,
+      hash: FRESH_BLOCK_HASH,
+      timestamp: `0x${ISSUED_AT.toString(16)}`,
+    };
+  }
+  throw new Error(`unexpected preview block ${String(blockNumber)}`);
+}
+
+function stateReadResult(request: {
+  readonly method: string;
+  readonly params: readonly unknown[];
+}): Hex {
+  if (request.method !== "eth_call") {
+    throw new Error(`unexpected state-read method ${request.method}`);
+  }
+  const call = request.params[0] as { readonly to: string; readonly data: string };
+  const selector = call.data.slice(0, 10);
+  const target = call.to.toLowerCase();
+  const blockSelector = request.params[1] as { readonly blockHash?: unknown };
+  const currentTick = blockSelector.blockHash === FRESH_BLOCK_HASH ? 96 : 95;
+
+  switch (selector) {
+    case "0x6352211e":
+      return encode("address", [PROVIDER]);
+    case "0x081812fc":
+      return encode("address", [ZERO_ADDRESS]);
+    case "0xe985e9c5":
+      return encode("bool", [false]);
+    case "0xc45a0155":
+      return encode("address", [BSC_PANCAKE_V3.factory]);
+    case "0xd5f39488":
+      return encode("address", [BSC_PANCAKE_V3.deployer]);
+    case "0x99fbab88":
+      return encode(
+        "uint96,address,address,address,uint24,int24,int24,uint128,uint256,uint256,uint128,uint128",
+        [
+          0n,
+          ZERO_ADDRESS,
+          TOKEN0,
+          TOKEN1,
+          500,
+          -100,
+          100,
+          1_000n,
+          0n,
+          0n,
+          0n,
+          0n,
+        ],
+      );
+    case "0x3850c7bd":
+      return encode("uint160,int24,uint16,uint16,uint16,uint32,bool", [
+        79_228_162_514_264_337_593_543_950_336n,
+        currentTick,
+        1,
+        2,
+        3,
+        0,
+        true,
+      ]);
+    case "0x1a686502":
+      return encode("uint128", [1_000_000n]);
+    case "0x0dfe1681":
+      return encode("address", [TOKEN0]);
+    case "0xd21220a7":
+      return encode("address", [TOKEN1]);
+    case "0xddca3f43":
+      return encode("uint24", [500]);
+    case "0xd0c93a7c":
+      return encode("int24", [10]);
+    case "0x1698ee82":
+      return encode("address", [POOL]);
+    case "0x22afcccb":
+      return encode("int24", [10]);
+    case "0x313ce567":
+      return encode("uint8", [18]);
+    case "0x70a08231":
+    case "0xdd62ed3e":
+      return encode("uint256", [10_000n]);
+    default:
+      throw new Error(`unexpected state-read selector ${selector} for ${target}`);
+  }
+}
+
+function encode(types: string, values: readonly unknown[]): Hex {
+  return encodeAbiParameters(parseAbiParameters(types), values as never);
+}
+
+function boundedJsonResponse(value: unknown): BoundedHttpResponse {
+  const body = Buffer.from(JSON.stringify(value));
+  return {
+    status: 200,
+    contentType: "application/json",
+    retryAfter: null,
+    rateLimitRemaining: null,
+    body,
+    responseSha256: createHash("sha256").update(body).digest("hex"),
+    resolvedAddress: "93.184.216.34",
+    startedAt: new Date(ISSUED_AT * 1_000).toISOString(),
+    finishedAt: new Date(ISSUED_AT * 1_000 + 10).toISOString(),
+    latencyMs: 10,
   };
 }
 

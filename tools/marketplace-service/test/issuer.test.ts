@@ -9,7 +9,7 @@ import {
   buildDisplaySafeProjectionPayload,
   createMarketplaceAttestationSigner,
 } from "../src/issuer.js";
-import { createMarketplaceVerifierRuntime } from "../src/runtime.js";
+import { createMarketplaceVerifierRuntime } from "../src/index.js";
 import {
   ISSUED_AT,
   VERIFIER_POLICY_SHA256,
@@ -19,6 +19,9 @@ import {
 } from "./fixture.js";
 import {
   brandedVerifierFixture,
+  DEFAULT_FRESH_BLOCK_HASH,
+  DEFAULT_SIGNED_BLOCK_HASH,
+  defaultRuntimeFixture,
   verifierInvocationFixture,
   verifierPolicySha256ForInvocation,
 } from "./verifier-fixture.js";
@@ -75,6 +78,140 @@ test("a genuine verifier success signs decimal and Unicode evidence accepted by 
   assert.equal(evaluation.quotes.length, 1);
   assert.equal(evaluation.decisions.length, 1);
   assert.equal(evaluation.receipt.evaluatedAt, ISSUED_AT + 1);
+});
+
+test("the public runtime completes the default bounded preview path accepted by Core", async () => {
+  const fixture = await defaultRuntimeFixture();
+  const runtime = createMarketplaceVerifierRuntime({
+    ...signerOptions({ verifierPolicySha256: fixture.verifierPolicySha256 }),
+    verifier: fixture.verifier,
+  });
+
+  const result = await runtime.evaluateAndAttest({ request: fixture.request });
+  assert.equal(result.outcome, "attested");
+  if (result.outcome !== "attested") return;
+  assert.equal(result.payload.preview.status, "passed");
+  assert.equal(result.payload.categoryEvidence.category, "rebalancing");
+  if (result.payload.categoryEvidence.category === "rebalancing") {
+    assert.equal(result.payload.categoryEvidence.currentTick, 96);
+    assert.equal(result.payload.categoryEvidence.proposedLowerTick, 0);
+    assert.equal(result.payload.categoryEvidence.proposedUpperTick, 200);
+  }
+
+  const routeKinds = fixture.routes.map((route) => route.kind);
+  assert.deepEqual(new Set(routeKinds), new Set(["a2a-quote", "bsc-preview-rpc"]));
+  assert.equal(fixture.routes.length, 71);
+  const previewPurposes = fixture.routes.flatMap((route) =>
+    route.kind === "bsc-preview-rpc" ? [route.purpose] : [],
+  );
+  for (const required of [
+    "chain-id",
+    "head-block-number",
+    "block-header",
+    "contract-code",
+    "state-read",
+    "simulation",
+  ] as const) {
+    assert.ok(previewPurposes.includes(required), `missing ${required} route`);
+  }
+  const purposeCounts = Object.fromEntries(
+    [
+      "chain-id",
+      "head-block-number",
+      "block-header",
+      "contract-code",
+      "state-read",
+      "simulation",
+    ].map((purpose) => [
+      purpose,
+      previewPurposes.filter((observed) => observed === purpose).length,
+    ]),
+  );
+  assert.deepEqual(purposeCounts, {
+    "chain-id": 2,
+    "head-block-number": 1,
+    "block-header": 6,
+    "contract-code": 16,
+    "state-read": 44,
+    simulation: 1,
+  });
+
+  const signedSnapshotPurposes = [
+    "chain-id",
+    "block-header",
+    ...Array.from({ length: 6 }, () => "contract-code"),
+    ...Array.from({ length: 13 }, () => "state-read"),
+    ...Array.from({ length: 2 }, () => "contract-code"),
+    ...Array.from({ length: 9 }, () => "state-read"),
+    "block-header",
+  ];
+  const freshSnapshotPurposes = [
+    "chain-id",
+    "head-block-number",
+    ...signedSnapshotPurposes.slice(1),
+  ];
+  assert.deepEqual(
+    fixture.routes.map((route) =>
+      route.kind === "bsc-preview-rpc" ? route.purpose : route.kind,
+    ),
+    [
+      "a2a-quote",
+      ...signedSnapshotPurposes,
+      ...freshSnapshotPurposes,
+      "simulation",
+      "block-header",
+      "block-header",
+    ],
+  );
+
+  const previewRoutes = fixture.routes.filter(
+    (route): route is Extract<typeof route, { kind: "bsc-preview-rpc" }> =>
+      route.kind === "bsc-preview-rpc",
+  );
+  const signedSnapshotRoutes = previewRoutes.slice(0, 33);
+  const freshSnapshotRoutes = previewRoutes.slice(33, 67);
+  for (const route of [...signedSnapshotRoutes, ...freshSnapshotRoutes]) {
+    if (route.purpose === "contract-code" || route.purpose === "state-read") {
+      assert.equal(
+        route.approvedBlockHash,
+        signedSnapshotRoutes.includes(route)
+          ? DEFAULT_SIGNED_BLOCK_HASH
+          : DEFAULT_FRESH_BLOCK_HASH,
+      );
+    }
+  }
+
+  const simulation = previewRoutes[67];
+  assert.equal(simulation?.purpose, "simulation");
+  if (!simulation || simulation.purpose !== "simulation") return;
+  assert.equal(simulation.approvedBlockHash, DEFAULT_FRESH_BLOCK_HASH);
+  const simulationRequest = JSON.parse(simulation.body) as {
+    params: readonly [
+      Record<string, unknown>,
+      { readonly blockHash: string; readonly requireCanonical: boolean },
+    ];
+  };
+  assert.equal(simulationRequest.params[1].blockHash, DEFAULT_FRESH_BLOCK_HASH);
+  assert.equal(simulationRequest.params[1].requireCanonical, true);
+
+  assert.deepEqual(
+    previewRoutes
+      .filter((route) => route.purpose === "block-header")
+      .map((route) => route.approvedBlockNumber),
+    ["0x64", "0x64", "0x67", "0x67", "0x64", "0x67"],
+  );
+
+  const core = createMarketplaceCoreV2({
+    attestationTrust: runtime.pinnedTrust,
+    maxClockSkewSeconds: 30,
+    clock: () => ISSUED_AT + 1,
+  });
+  const evaluation = core.evaluateMarketplaceV2({
+    mandate: result.mandate,
+    attestations: [result.wire],
+  });
+  assert.equal(evaluation.decisions[0]?.outcome, "eligible");
+  assert.equal(evaluation.receipt.summary.eligible, 1);
 });
 
 test("pinned trust returns defensive public-key copies", () => {
