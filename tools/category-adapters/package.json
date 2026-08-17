@@ -1,0 +1,34 @@
+{
+  "name": "@mandatex/category-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fail-closed telemetry evidence producers for the grid, yield and lending-health marketplace categories.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node dist/smoke.js"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@mandatex/marketplace-core": "link:../marketplace-core",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3"
+  }
+}
