@@ -74,6 +74,14 @@ value and rejects any byte difference. This rejects duplicate keys, alternate
 numeric spellings, whitespace, and alternate Unicode escaping. Golden vectors
 must lock the exact signing bytes before the signer service is deployed.
 
+For portability across serializer implementations, object member names at any
+depth must not be ECMAScript array-index property names: canonical unsigned
+decimal strings from `0` through `4294967294`, with no leading zero except the
+single name `0`. Conforming implementations must reject such an object rather
+than rely on host-language map enumeration. Current strict attestation,
+mandate, and payload schemas contain only fixed nonnumeric member names, so
+this restriction does not change the frozen signing bytes.
+
 ## Time and cache rules
 
 - Maximum attestation TTL is 300 seconds.
@@ -124,4 +132,3 @@ The required legacy-v1/v2 parity test is decision parity from equivalent
 evidence. It does not assert input-shape parity: v1 deliberately rejects
 serialized capture objects, while v2 is specifically designed to accept a
 canonical serialized attestation.
-

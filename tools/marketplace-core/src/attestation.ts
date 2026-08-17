@@ -320,6 +320,17 @@ function decodeWire(wire: MarketplaceEvaluationAttestationWire): string {
   }
   const bytes =
     typeof wire === "string" ? Buffer.from(wire, "utf8") : Buffer.from(wire);
+  if (
+    bytes.byteLength >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  ) {
+    throw new MarketplaceCoreError(
+      "ATTESTATION_NONCANONICAL",
+      "evaluation attestation must not contain a UTF-8 byte-order mark",
+    );
+  }
   try {
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     if (typeof wire === "string" && decoded !== wire) {

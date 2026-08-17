@@ -59,6 +59,7 @@ import {
 import { PreviewSimulationError } from "../src/preview/rpc.js";
 import { marketplacePreviewEvaluationArtifactSchema } from "../src/preview/schema.js";
 import {
+  assertTrustedMarketplaceEvaluationSuccess,
   serializeMarketplacePreviewEvaluationArtifact,
   validateTrustedPreview,
   validateTrustedPreviewForActivation,
@@ -617,6 +618,27 @@ test("marketplace evaluation is replay-free, canonical, and retains both snapsho
     createHash("sha256")
       .update(canonicalQuoteJson(result.artifact.evidence.preview))
       .digest("hex"),
+  );
+  assert.doesNotThrow(() =>
+    assertTrustedMarketplaceEvaluationSuccess(result),
+  );
+  assert.throws(
+    () =>
+      assertTrustedMarketplaceEvaluationSuccess(structuredClone(result)),
+    /not produced by trusted validation/,
+  );
+  const originalReplayKey = result.artifact.prospectiveReplayKey;
+  const mutableArtifact = result.artifact as {
+    prospectiveReplayKey: string;
+  };
+  mutableArtifact.prospectiveReplayKey = "d".repeat(64);
+  assert.throws(
+    () => assertTrustedMarketplaceEvaluationSuccess(result),
+    /changed after validation/,
+  );
+  mutableArtifact.prospectiveReplayKey = originalReplayKey;
+  assert.doesNotThrow(() =>
+    assertTrustedMarketplaceEvaluationSuccess(result),
   );
   assert.equal(routes.filter((route) => route.kind === "a2a-quote").length, 1);
 });

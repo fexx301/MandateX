@@ -1,15 +1,8 @@
 import {
   quoteMandatexRebalanceMandateSchema,
   rebalanceTransactionPlanSchema,
-  type QuoteMandatexRebalanceMandate,
-  type RebalanceTransactionPlan,
 } from "@mandatex/agent-supply-verifier";
 import { z } from "zod";
-
-export const ACTIONABLE_QUOTE_REQUEST_ACKNOWLEDGEMENT =
-  "I_ACKNOWLEDGE_ACTIONABLE_QUOTE_REQUESTS" as const;
-export const OPERATOR_SIMULATION_ACKNOWLEDGEMENT =
-  "I_ACKNOWLEDGE_OPERATOR_SUPPLIED_SIMULATIONS_ONLY" as const;
 
 export const marketplaceCandidateSelectorSchema = z
   .object({
@@ -41,45 +34,42 @@ export const marketplaceEvaluationRequestSchema = z
   .object({
     mandate: quoteMandatexRebalanceMandateSchema,
     policy: marketplaceRequestPolicySchema,
-    candidates: z
-      .array(
-        z
-          .object({
-            selector: marketplaceCandidateSelectorSchema,
-            transactionPlan: rebalanceTransactionPlanSchema,
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(8),
-    acknowledgements: z
+    candidate: z
       .object({
-        actionableQuoteRequests: z.literal(
-          ACTIONABLE_QUOTE_REQUEST_ACKNOWLEDGEMENT,
-        ),
-        operatorSuppliedSimulations: z.literal(
-          OPERATOR_SIMULATION_ACKNOWLEDGEMENT,
-        ),
+        selector: marketplaceCandidateSelectorSchema,
+        transactionPlan: rebalanceTransactionPlanSchema,
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    if (request.mandate.chain_id !== 56) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mandate", "chain_id"],
+        message: "the marketplace verifier runtime supports BSC chain ID 56 only",
+      });
+    }
+    if (request.policy.createdAt >= request.mandate.expires_at) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["policy", "createdAt"],
+        message: "marketplace mandate creation must precede mandate expiry",
+      });
+    }
+    if (request.policy.createdAt >= request.mandate.permissions.expires_at) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["policy", "createdAt"],
+        message: "marketplace mandate creation must precede permission expiry",
+      });
+    }
+  });
 
 export type MarketplaceRequestPolicy = Readonly<
   z.infer<typeof marketplaceRequestPolicySchema>
 >;
 
-export type MarketplaceCandidateRequest = Readonly<{
-  selector: MarketplaceCandidateSelector;
-  transactionPlan: RebalanceTransactionPlan;
-}>;
-
-export type MarketplaceEvaluationRequest = Readonly<{
-  mandate: QuoteMandatexRebalanceMandate;
-  policy: MarketplaceRequestPolicy;
-  candidates: readonly MarketplaceCandidateRequest[];
-  acknowledgements: Readonly<{
-    actionableQuoteRequests: typeof ACTIONABLE_QUOTE_REQUEST_ACKNOWLEDGEMENT;
-    operatorSuppliedSimulations: typeof OPERATOR_SIMULATION_ACKNOWLEDGEMENT;
-  }>;
-}>;
+export type MarketplaceEvaluationRequest = Readonly<
+  z.infer<typeof marketplaceEvaluationRequestSchema>
+>;

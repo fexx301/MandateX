@@ -24,7 +24,6 @@ import {
   prepareTrustedQuoteAttempt,
   QuotePreflightError,
   validateTrustedQuote,
-  type TrustedQuoteAttemptOptions,
   type TrustedQuotePreReplayGateInput,
   type TrustedQuoteReplayCandidate,
   type TrustedQuoteReplayCommitResult,
@@ -169,6 +168,42 @@ export type TrustedPreviewMarketplaceEvaluationSuccess = Readonly<{
 export type TrustedPreviewMarketplaceEvaluationResult =
   | TrustedPreviewMarketplaceEvaluationSuccess
   | TrustedPreviewMarketplaceEvaluationFailure;
+
+const trustedMarketplaceEvaluationResults = new WeakMap<object, string>();
+
+export function assertTrustedMarketplaceEvaluationSuccess(
+  value: unknown,
+): asserts value is TrustedPreviewMarketplaceEvaluationSuccess {
+  if (value === null || typeof value !== "object") {
+    throw new Error(
+      "marketplace evaluation result was not produced by trusted validation",
+    );
+  }
+  const expectedArtifactSha256 = trustedMarketplaceEvaluationResults.get(value);
+  if (expectedArtifactSha256 === undefined) {
+    throw new Error(
+      "marketplace evaluation result was not produced by trusted validation",
+    );
+  }
+  let actualArtifactSha256: string;
+  try {
+    const result = value as TrustedPreviewMarketplaceEvaluationSuccess;
+    actualArtifactSha256 = computeQuoteSha256(
+      canonicalQuoteJson(
+        marketplacePreviewEvaluationArtifactSchema.parse(result.artifact),
+      ),
+    );
+  } catch (cause) {
+    throw new Error("trusted marketplace evaluation result is malformed", {
+      cause,
+    });
+  }
+  if (actualArtifactSha256 !== expectedArtifactSha256) {
+    throw new Error(
+      "trusted marketplace evaluation result changed after validation",
+    );
+  }
+}
 
 class PreviewGateFailure extends Error {
   constructor(
@@ -333,10 +368,18 @@ export async function validateTrustedPreviewForMarketplaceEvaluation(
     throw new QuotePreflightError("PREVIEW_INPUT_UNSUPPORTED");
   }
 
-  const { transactionPlan: _transactionPlan, ...quoteOptions } = options;
-  const attempt = prepareTrustedQuoteAttempt(
-    quoteOptions as TrustedQuoteAttemptOptions,
-  );
+  const attempt = prepareTrustedQuoteAttempt({
+    manifest: options.manifest,
+    passiveReport: options.passiveReport,
+    trustFile: options.trustFile,
+    candidate: options.candidate,
+    mandate: options.mandate,
+    transport: options.transport,
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.randomUUID === undefined
+      ? {}
+      : { randomUUID: options.randomUUID }),
+  });
   const result = await executeTrustedQuoteAttempt(attempt, async (input) => {
     let progress: PreviewProgress;
     try {
@@ -594,7 +637,7 @@ function buildMarketplaceEvaluationSuccess(input: Readonly<{
     },
   });
 
-  return {
+  const result: TrustedPreviewMarketplaceEvaluationSuccess = {
     schema: "mandatex.agent-supply.marketplace-preview-evaluation-result.v1",
     scope: "evaluation_only",
     actionability: "unreserved",
@@ -608,6 +651,11 @@ function buildMarketplaceEvaluationSuccess(input: Readonly<{
     signedSnapshot: artifact.evidence.preview.signedSnapshot.snapshot,
     preview: publicPreviewPass(input.progress),
   };
+  trustedMarketplaceEvaluationResults.set(
+    result,
+    computeQuoteSha256(canonicalQuoteJson(artifact)),
+  );
+  return result;
 }
 
 function marketplaceDecodedPlan(

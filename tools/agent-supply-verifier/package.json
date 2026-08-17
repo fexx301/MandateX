@@ -4,6 +4,15 @@
   "private": true,
   "description": "Passive BSC agent supply verification plus explicitly armed trusted quote validation for MandateX.",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "packageManager": "pnpm@10.24.0",
   "engines": {
     "node": ">=22"

@@ -94,9 +94,9 @@ The first implementation may emit only these candidate classifications:
   rate-limited, malformed, or exceeded a safety budget.
 - `UNAVAILABLE`: a candidate-specific endpoint or identity check definitively
   failed after the verifier itself was healthy and able to make the check.
-- `VERIFIED_HIREABLE`: reserved for a later version. It is unreachable in this
-  passive release because active quote, category-policy, preview, and activation
-  evidence are not folded back into the passive candidate classification.
+
+Hireability is not a passive-report classification. Active quote,
+category-policy, preview, and activation evidence remain separate artifacts.
 
 An outage is never converted into candidate `UNAVAILABLE`; use `INCONCLUSIVE`
 with a redacted source error instead.
@@ -384,7 +384,7 @@ shared call deadline against the same decision timestamp. The artifact excludes
 raw calldata, the private plan, signed task, provider signature, balances,
 allowances, amount details, and revert data. A pass is named
 `PREVIEW_SIMULATION_PASSED`. It is historical, operator-plan evidence only and
-cannot promote the passive candidate to `VERIFIED_HIREABLE`.
+does not declare the passive candidate hireable.
 
 ## Armed ERC-8183 Activation Journal Contract
 
@@ -494,8 +494,8 @@ The report keeps each gate separate:
 | Transaction preview | Read-only simulation | `unknown` in v1 |
 | ERC-8183 activation | Armed journal outside the passive report | `unknown` in passive v1 |
 
-Because these active hireability gates remain outside the passive report, no
-passive v1 result may emit `VERIFIED_HIREABLE`.
+Because these active hireability gates remain outside the passive report, a
+passive v1 result cannot declare a candidate hireable.
 
 ## Versioned Report
 
@@ -534,7 +534,7 @@ Tests must prove that the verifier:
   malformed responses;
 - does not promote source outages to candidate `UNAVAILABLE`;
 - keeps claimed, detected, and verified evidence distinct;
-- never emits `VERIFIED_HIREABLE` in the passive release;
+- never declares a candidate hireable in the passive release;
 - produces identical report serialization for identical observations;
 - redacts URLs, authorization material, and provider secrets from errors.
 

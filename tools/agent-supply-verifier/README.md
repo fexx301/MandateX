@@ -130,8 +130,8 @@ reusing the marker.
 
 Exit codes for `verify:quote` are `0` valid, `2` inconclusive, `3` refused,
 `4` invalid, and `1` for input or internal failure. A valid quote is still not
-a funded job and does not promote the passive candidate report to
-`VERIFIED_HIREABLE`; transaction preview and activation remain separate gates.
+a funded job and does not declare the passive candidate hireable; transaction
+preview and activation remain separate gates.
 
 ## Structural transaction preview
 
@@ -158,9 +158,9 @@ The current version is deliberately narrow:
   quote/mandate/permission/transaction-deadline rechecks before replay.
 
 The plan is operator supplied, not agent-authenticated or verifier-generated.
-A passing artifact is therefore labelled `PREVIEW_SIMULATION_PASSED`, never
-`VERIFIED_HIREABLE`. It proves only that the exact structural plan did not
-revert at the recorded block. It does not prove profitability, independent USD
+A passing artifact is therefore labelled `PREVIEW_SIMULATION_PASSED`. It does
+not declare the candidate hireable. It proves only that the exact structural
+plan did not revert at the recorded block, not profitability, independent USD
 spend or gas economics, caller key control, submission, or future execution.
 
 Prepare the additional private input:

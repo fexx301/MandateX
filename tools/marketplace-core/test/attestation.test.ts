@@ -402,6 +402,20 @@ test("canonical wire rejects size, UTF-8, whitespace, duplicate keys, and numeri
     () => evaluateWire(`${signedWire()}\n`),
     hasCode("ATTESTATION_NONCANONICAL"),
   );
+  assert.throws(
+    () => evaluateWire(`\uFEFF${signedWire()}`),
+    hasCode("ATTESTATION_NONCANONICAL"),
+  );
+  assert.throws(
+    () =>
+      evaluateWire(
+        Buffer.concat([
+          Buffer.from([0xef, 0xbb, 0xbf]),
+          Buffer.from(signedWire(), "utf8"),
+        ]),
+      ),
+    hasCode("ATTESTATION_NONCANONICAL"),
+  );
 
   const duplicateKey = signedWire().replace(
     `"schema":"${MARKETPLACE_EVALUATION_ATTESTATION_SCHEMA}"`,
@@ -420,6 +434,23 @@ test("canonical wire rejects size, UTF-8, whitespace, duplicate keys, and numeri
     () => evaluateWire(alternateNumber),
     hasCode("ATTESTATION_NONCANONICAL"),
   );
+
+  const alternateUnicodeEscape = signedWire().replace(
+    "Rebalance",
+    "\\u0052ebalance",
+  );
+  assert.throws(
+    () => evaluateWire(alternateUnicodeEscape),
+    hasCode("ATTESTATION_NONCANONICAL"),
+  );
+
+  const unknownField = mutateCanonicalWire(signedWire(), (envelope) => {
+    envelope.algorithm = "Ed25519";
+  });
+  assert.throws(
+    () => evaluateWire(unknownField),
+    hasCode("ATTESTATION_SCHEMA_INVALID"),
+  );
 });
 
 test("attestations are reusable until expiry and re-enter the live clock", () => {
@@ -429,6 +460,14 @@ test("attestations are reusable until expiry and re-enter the live clock", () =>
     mandate: rawMandate(),
     attestations: [wire],
   });
+  const separateEvaluator = makeCore();
+  assert.deepEqual(
+    separateEvaluator.core.evaluateMarketplaceV2({
+      mandate: rawMandate(),
+      attestations: [wire],
+    }),
+    first,
+  );
   evaluator.setClock(EXPIRES_AT - 1);
   const second = evaluator.core.evaluateMarketplaceV2({
     mandate: rawMandate(),

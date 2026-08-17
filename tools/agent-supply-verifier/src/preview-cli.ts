@@ -254,7 +254,7 @@ function previewHelp(): string {
     "The output file must not already exist.",
     `A pass still requires at least ${MIN_QUOTE_REMAINING_SECONDS} seconds of quote, mandate, permission, and transaction deadline life at decision time.`,
     "PREVIEW_SIMULATION_PASSED is historical structural evidence only. It does",
-    "not mean VERIFIED_HIREABLE and does not prove profitability or future execution.",
+    "not declare hireability or prove profitability or future execution.",
     "",
     "Exit codes: 0 preview passed, 2 inconclusive, 3 refused, 4 invalid, 1 input/internal error.",
     "",

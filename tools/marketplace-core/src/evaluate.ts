@@ -802,6 +802,10 @@ function evaluateMarketplaceWithCapability(
   });
 }
 
+/**
+ * @deprecated Use createMarketplaceCoreV2 for portable signed evaluation
+ * attestations. This factory accepts only process-local v1 capture objects.
+ */
 export function createMarketplaceCore(
   options: MarketplaceCoreOptions,
 ): MarketplaceCore {
@@ -847,8 +851,7 @@ export function createMarketplaceCore(
 }
 
 /**
- * Deprecated v1 process-local capture factory. New integrations must use
- * createMarketplaceCoreV2 with serialized evaluation attestations.
+ * @deprecated Explicit alias for the v1 process-local capture factory.
  */
 export const createLegacyMarketplaceCoreV1 = createMarketplaceCore;
 

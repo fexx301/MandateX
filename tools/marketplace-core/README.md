@@ -21,9 +21,54 @@ The receipt is labelled `evaluation_only`. Its SHA-256 commitments make the
 mandate, normalized quote order, decision order, and ranking reproducible; they
 are evidence commitments, not signatures or execution proofs.
 
-## Trust boundary
+## Portable v2 trust boundary
 
-Marketplace Core does not load or reconstruct quotes from verifier sidecars.
+New integrations use `createMarketplaceCoreV2`. The evaluator pins one
+Ed25519 public key, its SPKI SHA-256 fingerprint, one key ID, and one accepted
+verifier-policy SHA-256 at deployment. The private key remains in the
+separately deployed verifier runtime.
+
+The v2 API accepts only bounded canonical UTF-8 JSON using the frozen
+`mandatex.marketplace.evaluation-attestation.v1` envelope. It verifies the
+fixed issuer, audience, evaluation-only scope, explicit lack of activation or
+reservation authority, complete mandate and payload hashes, 300-second maximum
+TTL, evidence chronology, pinned policy, and domain-separated Ed25519
+signature before ordinary evaluation begins. Any attestation failure aborts
+the complete evaluation.
+
+```ts
+const core = createMarketplaceCoreV2({
+  attestationTrust: {
+    keyId: "verifier-production-1",
+    publicKeySpkiDer,
+    publicKeyFingerprintSha256,
+    verifierPolicySha256,
+  },
+  maxClockSkewSeconds: 30,
+  clock: () => unixSeconds,
+});
+
+const result = core.evaluateMarketplaceV2({
+  mandate,
+  attestations: [canonicalAttestationJson],
+});
+```
+
+Attestations are reusable for read-only evaluation until expiry. Every call
+re-enters Core and recomputes freshness, eligibility, and ranking against the
+current evaluator clock. They never authorize activation; selection must use
+the separate reservation and replay-claiming activation path.
+
+The exact deployment and wire contract is frozen in
+`EVALUATION_ATTESTATION_V2.md`.
+
+## Deprecated v1 trust boundary
+
+The process-local v1 API remains available as `createMarketplaceCore` and the
+explicit `createLegacyMarketplaceCoreV1` alias while decision-parity migration
+finishes. Both are deprecated and have no automatic v2 fallback.
+
+Marketplace Core v1 does not load or reconstruct quotes from verifier sidecars.
 Those redacted sidecars intentionally omit fields such as price, permissions,
 estimates, and signed task data.
 
@@ -60,10 +105,8 @@ calldata, sidecars, and unknown fields. The ingress stamps `schema`,
 `captureContext`, and `capturedAt` itself.
 
 The installer-owned ingress is an integration capability, not a cryptographic
-verifier. The repository does not yet wire it into a production quote-validator
-owner; an integration must retain it only in the already-trusted quote and
-preview validation-success path. Marketplace Core deliberately exposes no
-public recapture, raw normalization, scoring, or sidecar-loading helper.
+verifier. Marketplace Core deliberately exposes no public recapture, raw
+normalization, scoring, or sidecar-loading helper.
 
 Live evaluation reads the injected core clock exactly once and writes that time
 to the receipt. Callers cannot select an historical `evaluatedAt` value for a
@@ -135,19 +178,24 @@ No placeholder cards or fabricated category metrics are generated.
 - Only `eligible` decisions receive a score.
 - Ranking uses exact integer arithmetic and these frozen weights:
 
-| Factor | Weight |
-| --- | ---: |
-| Mandate fit | 30 |
-| Execution readiness | 20 |
-| Evidence freshness | 20 |
-| Risk compatibility | 15 |
-| Total cost | 10 |
-| Reputation confidence | 5 |
+| Factor | Weight | Ranking role |
+| --- | ---: | --- |
+| Mandate fit | 30 | Eligibility confirmation; fixed at full score for every ranked quote |
+| Execution readiness | 20 | Eligibility confirmation; fixed at full score for every ranked quote |
+| Evidence freshness | 20 | Discriminating |
+| Risk compatibility | 15 | Discriminating |
+| Total cost | 10 | Discriminating |
+| Reputation confidence | 5 | Discriminating |
 
 Each factor is `0..10000` basis points. `weightedPoints` is the exact
 `weight * scoreBps` integer. Ranking compares the unrounded weighted total,
 then candidate identity and quote ID for deterministic ties. Scores are a
 transparent comparison aid, never a guarantee of performance.
+
+The first two factors encode gates that every eligible quote has already
+passed, so together they add the same 5,000-bps baseline to every ranked
+candidate and do not affect relative order. Comparison UIs must label them as
+eligibility confirmations or omit them from the discriminating-factor display.
 
 ## Commands
 
