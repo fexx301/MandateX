@@ -166,7 +166,10 @@ The remaining required categories are honest, stable unsupported results:
 - `CATEGORY_YIELD_UNSUPPORTED`
 - `CATEGORY_HEALTH_UNSUPPORTED`
 
-No placeholder cards or fabricated category metrics are generated.
+Core keeps this mapping in a closed, recursively frozen internal policy table.
+That table centralizes normalization and receipt metadata only; it is not a
+runtime adapter registry or a category enable switch. No placeholder cards or
+fabricated category metrics are generated.
 
 ## Candidate and ranking rules
 

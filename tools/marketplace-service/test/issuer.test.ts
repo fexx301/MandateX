@@ -510,3 +510,46 @@ test("runtime rejects a policy hash that does not match fixed verifier inputs", 
       error.code === "VERIFIER_CONFIGURATION_INVALID",
   );
 });
+
+test("signer and runtime reject future policy fields instead of silently ignoring them", () => {
+  const verifier = verifierInvocationFixture({
+    async request(): Promise<never> {
+      throw new Error("unused");
+    },
+  });
+  assert.throws(
+    () =>
+      createMarketplaceVerifierRuntime({
+        ...signerOptions({
+          verifierPolicySha256: verifierPolicySha256ForInvocation(verifier),
+          categoryDeploymentSha256: "00".repeat(32),
+        }),
+        verifier,
+      } as never),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "VERIFIER_CONFIGURATION_INVALID",
+  );
+  assert.throws(
+    () =>
+      createMarketplaceAttestationSigner({
+        ...signerOptions(),
+        categoryDeploymentSha256: "00".repeat(32),
+      } as never),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "ATTESTATION_SIGNER_INVALID",
+  );
+});
+
+test("signer rejects missing and non-string key IDs at construction", () => {
+  for (const keyId of [undefined, null, 7] as const) {
+    const options = signerOptions({ keyId });
+    assert.throws(
+      () => createMarketplaceAttestationSigner(options as never),
+      (error: unknown) =>
+        error instanceof MarketplaceServiceError &&
+        error.code === "ATTESTATION_SIGNER_INVALID",
+    );
+  }
+});

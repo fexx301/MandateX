@@ -12,6 +12,7 @@ import {
   type ProjectionCapability,
   type TrustedProjectionIngress,
 } from "./capture.js";
+import { CATEGORY_POLICIES } from "./category-policy.js";
 import {
   exclusionFinding,
   inconclusiveFinding,
@@ -679,21 +680,7 @@ function buildReceipt(
     evaluatedAt,
     mandateId: mandate.mandateId,
     category: mandate.category,
-    adapter:
-      mandate.category === "rebalancing"
-        ? {
-            status: "supported" as const,
-            name: "pancakeswap-v3-rebalancing-v1" as const,
-          }
-        : {
-            status: "unsupported" as const,
-            code:
-              mandate.category === "grid"
-                ? ("CATEGORY_GRID_UNSUPPORTED" as const)
-                : mandate.category === "yield"
-                  ? ("CATEGORY_YIELD_UNSUPPORTED" as const)
-                  : ("CATEGORY_HEALTH_UNSUPPORTED" as const),
-          },
+    adapter: CATEGORY_POLICIES[mandate.category].receiptAdapter,
     commitments,
     quotes: quoteReferences,
     decisions: decisionReferences,

@@ -65,6 +65,27 @@ export interface MarketplaceVerifierPolicyIdentity {
   readonly trustPolicySha256: string;
 }
 
+export interface MarketplaceVerifierPolicyManifest {
+  readonly schema: typeof MARKETPLACE_VERIFIER_POLICY_SCHEMA;
+  readonly passivePolicyFingerprint: string;
+  readonly trustPolicySha256: string;
+  readonly profiles: typeof MARKETPLACE_VERIFIER_POLICY_PROFILES;
+  readonly contracts: Readonly<{
+    readonly quoteTrust: typeof QUOTE_TRUST_SCHEMA;
+    readonly quoteEvidence: typeof QUOTE_MARKETPLACE_EVALUATION_EVIDENCE_SCHEMA;
+    readonly previewEvaluation: typeof MARKETPLACE_PREVIEW_EVALUATION_SCHEMA;
+  }>;
+  readonly quotePolicy: Readonly<{ readonly limits: typeof ACTIVE_QUOTE_LIMITS }>;
+  readonly previewPolicy: Readonly<{
+    readonly finalBufferSeconds: typeof PREVIEW_FINAL_BUFFER_SECONDS;
+    readonly rpcLimits: typeof BSC_PREVIEW_RPC_LIMITS;
+  }>;
+  readonly transportPolicy: Readonly<{
+    readonly defaultLimits: typeof DEFAULT_HTTP_LIMITS;
+  }>;
+  readonly chainDeployment: typeof BSC_PANCAKE_V3;
+}
+
 export const MARKETPLACE_VERIFIER_POLICY_SCHEMA =
   "mandatex.marketplace.verifier-policy.v1" as const;
 
@@ -95,7 +116,25 @@ interface MarketplaceAttestationSigner {
 export function marketplaceVerifierPolicySha256(
   identity: MarketplaceVerifierPolicyIdentity,
 ): string {
-  return canonicalSha256({
+  return canonicalSha256(marketplaceVerifierPolicyManifest(identity));
+}
+
+/**
+ * Returns the exact object whose canonical bytes identify the active verifier
+ * policy. Keeping construction separate from hashing makes the policy auditable
+ * and gives future category deployment data a separate, explicit insertion point
+ * without changing today's digest when no category is enabled.
+ */
+export function marketplaceVerifierPolicyManifest(
+  identity: MarketplaceVerifierPolicyIdentity,
+): MarketplaceVerifierPolicyManifest {
+  assertExactPlainDataObject(
+    identity,
+    ["passivePolicyFingerprint", "trustPolicySha256"],
+    "verifier policy identity",
+    ["passivePolicyFingerprint", "trustPolicySha256"],
+  );
+  return deepFreeze({
     schema: MARKETPLACE_VERIFIER_POLICY_SCHEMA,
     passivePolicyFingerprint: parseSha256(
       identity.passivePolicyFingerprint,
@@ -129,12 +168,18 @@ export function marketplaceVerifierPolicySha256(
 export function createMarketplaceAttestationSigner(
   options: MarketplaceAttestationSignerOptions,
 ): MarketplaceAttestationSigner {
-  if (options === null || typeof options !== "object") {
-    throw new MarketplaceServiceError(
-      "ATTESTATION_SIGNER_INVALID",
-      "marketplace attestation signer options must be an object",
-    );
-  }
+  assertExactPlainDataObject(
+    options,
+    [
+      "keyId",
+      "privateKeyPkcs8Der",
+      "verifierPolicySha256",
+      "clock",
+      "randomUUID",
+    ],
+    "attestation signer options",
+    ["keyId", "privateKeyPkcs8Der", "verifierPolicySha256", "clock"],
+  );
   const keyId = parseKeyId(options.keyId);
   const verifierPolicySha256 = parseSha256(
     options.verifierPolicySha256,
@@ -823,7 +868,10 @@ function decimalToSafeNonnegativeInteger(
 }
 
 function parseKeyId(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+  ) {
     throw new MarketplaceServiceError(
       "ATTESTATION_SIGNER_INVALID",
       "the verifier-runtime attestation key ID is invalid",
@@ -833,13 +881,61 @@ function parseKeyId(value: string): string {
 }
 
 function parseSha256(value: string, label: string): string {
-  if (!/^[a-f0-9]{64}$/.test(value)) {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
     throw new MarketplaceServiceError(
       "ATTESTATION_SIGNER_INVALID",
       `the ${label} SHA-256 is invalid`,
     );
   }
   return value;
+}
+
+function assertExactPlainDataObject(
+  value: unknown,
+  allowedKeys: readonly string[],
+  label: string,
+  requiredKeys: readonly string[] = [],
+): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") {
+    throw new MarketplaceServiceError(
+      "ATTESTATION_SIGNER_INVALID",
+      `${label} must be a plain exact object`,
+    );
+  }
+  const object = value as object;
+  const prototype = Object.getPrototypeOf(object);
+  const allowed = new Set(allowedKeys);
+  const keys = Reflect.ownKeys(object);
+  if (
+    (prototype !== Object.prototype && prototype !== null) ||
+    keys.some((key) => typeof key !== "string" || !allowed.has(key))
+  ) {
+    throw new MarketplaceServiceError(
+      "ATTESTATION_SIGNER_INVALID",
+      `${label} contains unsupported fields`,
+    );
+  }
+  for (const key of requiredKeys) {
+    if (!Object.hasOwn(object, key)) {
+      throw new MarketplaceServiceError(
+        "ATTESTATION_SIGNER_INVALID",
+        `${label} is missing required field: ${key}`,
+      );
+    }
+  }
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true
+    ) {
+      throw new MarketplaceServiceError(
+        "ATTESTATION_SIGNER_INVALID",
+        `${label} must contain enumerable data properties only`,
+      );
+    }
+  }
 }
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {

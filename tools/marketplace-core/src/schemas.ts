@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import {
+  CATEGORY_POLICIES,
+  MARKETPLACE_REBALANCING_ADAPTER,
+} from "./category-policy.js";
 import type { DeepReadonly } from "./immutable.js";
 import {
   findingSchema,
@@ -469,7 +473,7 @@ export const quoteNormalizationSchema = z.discriminatedUnion("status", [
   z
     .object({
       status: z.literal("normalized"),
-      adapter: z.literal("pancakeswap-v3-rebalancing-v1"),
+      adapter: z.literal(MARKETPLACE_REBALANCING_ADAPTER),
     })
     .strict(),
   z
@@ -575,6 +579,7 @@ export const marketplaceQuoteSchema = z
         });
       }
     } else {
+      const categoryPolicy = CATEGORY_POLICIES[quote.category];
       if (quote.normalization.status !== "unsupported") {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -582,13 +587,10 @@ export const marketplaceQuoteSchema = z
           message: "grid, yield, and health quotes are explicitly unsupported",
         });
       } else {
-        const expectedCode =
-          quote.category === "grid"
-            ? "CATEGORY_GRID_UNSUPPORTED"
-            : quote.category === "yield"
-              ? "CATEGORY_YIELD_UNSUPPORTED"
-              : "CATEGORY_HEALTH_UNSUPPORTED";
-        if (quote.normalization.code !== expectedCode) {
+        if (
+          categoryPolicy.receiptAdapter.status !== "unsupported" ||
+          quote.normalization.code !== categoryPolicy.receiptAdapter.code
+        ) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["normalization", "code"],
@@ -771,7 +773,7 @@ export const marketplaceReceiptSchema = z
       z
         .object({
           status: z.literal("supported"),
-          name: z.literal("pancakeswap-v3-rebalancing-v1"),
+          name: z.literal(MARKETPLACE_REBALANCING_ADAPTER),
         })
         .strict(),
       z
@@ -894,27 +896,26 @@ export const marketplaceReceiptSchema = z
         message: "ranking positions must be contiguous and one-based",
       });
     }
-    if (receipt.adapter.status === "unsupported") {
-      const expectedCode =
-        receipt.category === "grid"
-          ? "CATEGORY_GRID_UNSUPPORTED"
-          : receipt.category === "yield"
-            ? "CATEGORY_YIELD_UNSUPPORTED"
-            : receipt.category === "health"
-              ? "CATEGORY_HEALTH_UNSUPPORTED"
-              : undefined;
-      if (expectedCode === undefined || receipt.adapter.code !== expectedCode) {
+    const categoryPolicy = CATEGORY_POLICIES[receipt.category];
+    if (categoryPolicy.receiptAdapter.status === "unsupported") {
+      if (
+        receipt.adapter.status !== "unsupported" ||
+        receipt.adapter.code !== categoryPolicy.receiptAdapter.code
+      ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["adapter", "code"],
           message: "unsupported adapter code must match the receipt category",
         });
       }
-    } else if (receipt.category !== "rebalancing") {
+    } else if (
+      receipt.adapter.status !== "supported" ||
+      receipt.adapter.name !== categoryPolicy.receiptAdapter.name
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["adapter"],
-        message: "only rebalancing has a supported adapter",
+        message: "supported adapter must match the category policy",
       });
     }
   });

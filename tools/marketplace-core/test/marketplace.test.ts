@@ -3,6 +3,7 @@ import test from "node:test";
 
 import * as publicApi from "../src/index.js";
 import { createProjectionCapability } from "../src/capture.js";
+import { CATEGORY_POLICIES } from "../src/category-policy.js";
 import { normalizeCapturedQuote } from "../src/normalize.js";
 import {
   CandidateSetError,
@@ -56,6 +57,14 @@ test("happy path produces four validated artifacts and a deterministic ranking",
   assert.equal(result.decisions[0]?.outcome, "eligible");
   assert.equal(result.decisions[1]?.outcome, "eligible");
   assert.equal(result.receipt.effect, "evaluation_only");
+  assert.deepEqual(result.receipt.adapter, {
+    status: "supported",
+    name: "pancakeswap-v3-rebalancing-v1",
+  });
+  assert.deepEqual(result.quotes[0]?.normalization, {
+    status: "normalized",
+    adapter: "pancakeswap-v3-rebalancing-v1",
+  });
   assert.equal(result.receipt.summary.eligible, 2);
   assert.equal(result.receipt.ranking[0]?.candidate.tokenId, "7");
   assert.equal(result.receipt.ranking[0]?.rank, 1);
@@ -109,6 +118,18 @@ test("candidate and quote ordering do not affect receipt hashes", () => {
   assert.deepEqual(first.decisions, second.decisions);
 });
 
+test("the supported category preserves its pre-refactor receipt identity", () => {
+  const result = evaluateMarketplace({
+    mandate: rawMandate(),
+    candidates: [capturedQuote()],
+    evaluatedAt: 1_100,
+  });
+  assert.equal(
+    result.receipt.receiptId,
+    "2434e36b122a8bdbc7e88466fba2c0f4cd60354bed4e33b4ecadc255683a4471",
+  );
+});
+
 test("nonzero token atomic prices are explicit inconclusive and never ranked", () => {
   const result = evaluateMarketplace({
     mandate: rawMandate(),
@@ -123,18 +144,78 @@ test("nonzero token atomic prices are explicit inconclusive and never ranked", (
 });
 
 test("grid, yield, and health are explicit unsupported results", () => {
-  for (const category of ["grid", "yield", "health"] as const) {
+  const cases = [
+    [
+      "grid",
+      "CATEGORY_GRID_UNSUPPORTED",
+      "eed503ec0b13220b0815003d6065a9a625b7927a66b69dbce48d13b86357bd69",
+    ],
+    [
+      "yield",
+      "CATEGORY_YIELD_UNSUPPORTED",
+      "1a583e53d6bcd1e9aa989a538bf2f6b38b4100b58012ca667646072fcd8caa03",
+    ],
+    [
+      "health",
+      "CATEGORY_HEALTH_UNSUPPORTED",
+      "ca2e3eb421a0c69f6fa2fde282fb1da84209acc32a3ff09664baba41178a2883",
+    ],
+  ] as const;
+  for (const [category, expectedCode, expectedReceiptId] of cases) {
     const { rebalancing: _rebalancing, ...commonMandate } = rawMandate();
     const result = evaluateMarketplace({
       mandate: { ...commonMandate, category },
       candidates: [capturedQuote({ category })],
       evaluatedAt: 1_100,
     });
-    assert.equal(result.receipt.adapter.status, "unsupported");
+    assert.deepEqual(result.receipt.adapter, {
+      status: "unsupported",
+      code: expectedCode,
+    });
     assert.equal(result.decisions[0]?.outcome, "unsupported");
-    assert.equal(result.quotes[0]?.normalization.status, "unsupported");
+    assert.equal(result.decisions[0]?.findings[0]?.code, expectedCode);
+    assert.deepEqual(result.quotes[0]?.normalization, {
+      status: "unsupported",
+      code: expectedCode,
+    });
+    assert.equal(result.receipt.receiptId, expectedReceiptId);
     assert.equal(result.receipt.ranking.length, 0);
   }
+});
+
+test("unsupported category policy takes precedence over nonzero pricing", () => {
+  const { rebalancing: _rebalancing, ...commonMandate } = rawMandate();
+  const result = evaluateMarketplace({
+    mandate: { ...commonMandate, category: "grid" },
+    candidates: [capturedQuote({ category: "grid", amountAtomic: "1" })],
+    evaluatedAt: 1_100,
+  });
+  assert.equal(result.quotes[0]?.pricing.status, "usd_unavailable");
+  assert.deepEqual(result.quotes[0]?.normalization, {
+    status: "unsupported",
+    code: "CATEGORY_GRID_UNSUPPORTED",
+  });
+  assert.equal(result.decisions[0]?.outcome, "unsupported");
+});
+
+test("the closed category policy table is exhaustive and recursively frozen", () => {
+  assert.deepEqual(Object.keys(CATEGORY_POLICIES).sort(), [
+    "grid",
+    "health",
+    "rebalancing",
+    "yield",
+  ]);
+  assert.equal(Object.isFrozen(CATEGORY_POLICIES), true);
+  for (const policy of Object.values(CATEGORY_POLICIES)) {
+    assert.equal(Object.isFrozen(policy), true);
+    assert.equal(Object.isFrozen(policy.receiptAdapter), true);
+  }
+  const mutable = CATEGORY_POLICIES as unknown as {
+    grid: { receiptAdapter: { code: string } };
+  };
+  assert.throws(() => {
+    mutable.grid.receiptAdapter.code = "CATEGORY_YIELD_UNSUPPORTED";
+  }, TypeError);
 });
 
 test("hard eligibility gates fail closed with stable exclusion codes", () => {
@@ -499,6 +580,23 @@ test("receipt and decision schemas reject tampered arithmetic or classifications
   const receipt = structuredClone(result.receipt) as any;
   receipt.summary.excluded = 1;
   assert.throws(() => marketplaceReceiptSchema.parse(receipt));
+
+  const wrongSupportedCategory = structuredClone(result.receipt) as any;
+  wrongSupportedCategory.category = "grid";
+  assert.throws(() => marketplaceReceiptSchema.parse(wrongSupportedCategory));
+
+  const { rebalancing: _rebalancing, ...commonMandate } = rawMandate();
+  const unsupported = evaluateMarketplace({
+    mandate: { ...commonMandate, category: "grid" },
+    candidates: [capturedQuote({ category: "grid" })],
+    evaluatedAt: 1_100,
+  });
+  const wrongUnsupportedCode = structuredClone(unsupported.receipt) as any;
+  wrongUnsupportedCode.adapter.code = "CATEGORY_YIELD_UNSUPPORTED";
+  assert.throws(() => marketplaceReceiptSchema.parse(wrongUnsupportedCode));
+  const wrongQuoteCode = structuredClone(unsupported.quotes[0]) as any;
+  wrongQuoteCode.normalization.code = "CATEGORY_HEALTH_UNSUPPORTED";
+  assert.throws(() => marketplaceQuoteSchema.parse(wrongQuoteCode));
 
   const tamperedResult = structuredClone(result) as any;
   tamperedResult.receipt.receiptId = "00".repeat(32);

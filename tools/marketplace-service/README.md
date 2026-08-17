@@ -36,6 +36,28 @@ and display projection. Any change to one of those policy inputs requires a
 new hash and a coordinated evaluator repin. Runtime/build identity is outside
 this v1 manifest and is controlled by the deployment boundary.
 
+`marketplaceVerifierPolicyManifest()` exposes the exact object hashed by that
+active v1 policy, and its locked digest remains unchanged. Category deployment
+identity is intentionally separate for now:
+`parseMarketplaceCategoryDeploymentManifest()` validates and freezes a strict
+manifest, while `marketplaceCategoryDeploymentSha256()` hashes the normalized
+addresses, thresholds, adapter and evidence identifiers, validation profiles,
+and read selectors. These helpers do not add category data to the active policy,
+do not run adapters, and do not enable grid, yield, or health. Activation still
+requires verifier-side evidence integration, binding that deployment identity
+into trusted result provenance, a new active policy digest, and a coordinated
+signer/evaluator repin.
+
+The category manifest is closed-world: it contains exactly one explicit entry
+for each of `grid`, `health`, and `yield`. `enabled: false` entries omit
+configuration and are hashed as disabled; omission is never treated as a
+default. A development-only conformance check compares the mirrored IDs,
+evidence schemas, selectors, read counts, and health default with the standalone
+adapter package without adding that package to the signing runtime.
+Run it separately with `corepack pnpm run test:category-contract` after the
+adapter package parses and builds; it is intentionally kept outside the core
+unit-test command because that package is a separate ownership boundary.
+
 At construction, manifest, passive-report, and trust-file inputs are parsed
 into detached recursively frozen copies. The transport is retained only as a
 bound request capability, and the clock and UUID functions are captured once;

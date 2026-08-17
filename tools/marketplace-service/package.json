@@ -20,7 +20,8 @@
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:category-contract": "node --import tsx test/category-contract.test.mjs"
   },
   "dependencies": {
     "@mandatex/agent-supply-verifier": "file:../agent-supply-verifier",

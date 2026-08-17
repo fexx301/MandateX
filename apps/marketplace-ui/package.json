@@ -1,0 +1,23 @@
+{
+  "name": "@mandatex/marketplace-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Server-rendered marketplace UI: mandate input, quote comparison, exclusion reasons, permission review, activation state and receipts. Holds no key and evaluates nothing itself.",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "smoke": "node dist/smoke.js"
+  },
+  "devDependencies": {
+    "@mandatex/marketplace-api": "link:../marketplace-api",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3"
+  }
+}

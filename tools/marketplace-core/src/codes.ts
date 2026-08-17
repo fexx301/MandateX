@@ -183,11 +183,3 @@ export function sortFindings(findings: readonly Finding[]): Finding[] {
     ),
   );
 }
-
-export function unsupportedCodeForCategory(
-  category: "grid" | "yield" | "health",
-): UnsupportedCode {
-  if (category === "grid") return "CATEGORY_GRID_UNSUPPORTED";
-  if (category === "yield") return "CATEGORY_YIELD_UNSUPPORTED";
-  return "CATEGORY_HEALTH_UNSUPPORTED";
-}

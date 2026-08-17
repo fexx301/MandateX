@@ -60,6 +60,28 @@ export interface MarketplaceVerifierRuntimeOptions
 export function createMarketplaceVerifierRuntime(
   options: MarketplaceVerifierRuntimeOptions,
 ): MarketplaceVerifierRuntime {
+  try {
+    assertPlainDataObject(options, [
+      "keyId",
+      "privateKeyPkcs8Der",
+      "verifierPolicySha256",
+      "clock",
+      "randomUUID",
+      "verifier",
+    ], [
+      "keyId",
+      "privateKeyPkcs8Der",
+      "verifierPolicySha256",
+      "clock",
+      "verifier",
+    ]);
+  } catch (cause) {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "marketplace verifier runtime options contain unsupported fields",
+      { cause },
+    );
+  }
   const verifier = parseVerifierInvocation(options.verifier);
   const configuredPolicySha256 = marketplaceVerifierPolicySha256({
     passivePolicyFingerprint: verifier.passiveReport.policyFingerprint,
@@ -73,7 +95,15 @@ export function createMarketplaceVerifierRuntime(
       "the pinned verifier-policy hash does not match the fixed verifier configuration",
     );
   }
-  const signer = createMarketplaceAttestationSigner(options);
+  const signer = createMarketplaceAttestationSigner({
+    keyId: options.keyId,
+    privateKeyPkcs8Der: options.privateKeyPkcs8Der,
+    verifierPolicySha256: options.verifierPolicySha256,
+    clock: options.clock,
+    ...(options.randomUUID === undefined
+      ? {}
+      : { randomUUID: options.randomUUID }),
+  });
 
   return Object.freeze({
     get pinnedTrust(): MarketplaceAttestationTrust {
@@ -216,6 +246,7 @@ function assertExactKeys(
 function assertPlainDataObject(
   value: object,
   allowedKeys: readonly string[],
+  requiredKeys: readonly string[] = [],
 ): void {
   const prototype = Object.getPrototypeOf(value);
   const keys = Reflect.ownKeys(value);
@@ -236,6 +267,11 @@ function assertPlainDataObject(
       throw new TypeError(
         "verifier configuration must contain enumerable data properties only",
       );
+    }
+  }
+  for (const key of requiredKeys) {
+    if (!Object.hasOwn(value, key)) {
+      throw new TypeError(`verifier configuration is missing: ${key}`);
     }
   }
 }

@@ -1,9 +1,9 @@
 import { canonicalSha256 } from "./canonical.js";
+import { CATEGORY_POLICIES } from "./category-policy.js";
 import type {
   CapturedDisplaySafeQuoteProjection,
   ProjectionCapability,
 } from "./capture.js";
-import { unsupportedCodeForCategory } from "./codes.js";
 import {
   type DisplaySafeQuoteProjection,
   marketplaceQuoteSchema,
@@ -36,12 +36,13 @@ export function normalizeDisplaySafeQuoteProjection(
           code: "PRICING_USD_UNAVAILABLE" as const,
         };
 
+  const categoryPolicy = CATEGORY_POLICIES[projection.category];
   const normalization =
-    projection.category === "rebalancing"
+    categoryPolicy.evaluationSupport === "supported"
       ? projection.price.amountAtomic === "0"
         ? {
             status: "normalized" as const,
-            adapter: "pancakeswap-v3-rebalancing-v1" as const,
+            adapter: categoryPolicy.receiptAdapter.name,
           }
         : {
             status: "inconclusive" as const,
@@ -49,7 +50,7 @@ export function normalizeDisplaySafeQuoteProjection(
           }
       : {
           status: "unsupported" as const,
-          code: unsupportedCodeForCategory(projection.category),
+          code: categoryPolicy.receiptAdapter.code,
         };
 
   return marketplaceQuoteSchema.parse({
