@@ -112,3 +112,16 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# ── Local coordination and internal notes (untracked 2026-08-18) ─────────────
+# These stay on disk but out of the repository. They hold two-agent coordination
+# state, internal strategy, and supply research that names third-party operators
+# and host addresses. Anchored with a leading slash so the patterns match only
+# these files at the repository root, not any same-named file in a subtree.
+#
+# NOTE: untracking does not erase history. Earlier revisions of these files are
+# still reachable from prior commits; this only stops future commits carrying them.
+/SESSION_HANDOFF.md
+/plan.md
+/strategy.md
+/supply/README.md
