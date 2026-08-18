@@ -1,18 +1,26 @@
 # Deployment
 
-Target: **Railway Hobby, $5/mo** — one project, two services.
+Target: **Railway Hobby, $5/mo** — one project, three services.
 
 ```
 project: mandatex
 ├── mandatex-verifier   holds the Ed25519 PRIVATE key, evaluates and signs
-└── mandatex-app        pins only the PUBLIC key, verifies and serves
+├── mandatex-app        pins only the PUBLIC key, verifies and serves the API
+└── mandatex-ui         holds nothing; renders what the app returns
 ```
 
-Two services, not one, because the verifier runtime *is* the signer. A single
-process that both signs and verifies proves nothing — every signature it checked
-would be one it could have produced itself. The v2 contract requires the split,
-and requires proving both halves redeploy in lockstep before submission
-rehearsal.
+The verifier and app are two services, not one, because the verifier runtime *is*
+the signer. A single process that both signs and verifies proves nothing — every
+signature it checked would be one it could have produced itself. The v2 contract
+requires the split, and requires proving both halves redeploy in lockstep before
+submission rehearsal.
+
+**The UI is outside that boundary in both directions**, which is why adding it costs
+nothing in coordination. It holds no signing key *and* pins no trust: it has no
+`MANDATEX_TRUST_*` variables at all, because it displays verdicts the app already
+reached rather than reaching any itself. The lockstep pair remains strictly
+verifier ↔ app. See [Why the UI is its own
+service](#why-the-ui-is-its-own-service-and-not-a-second-process-in-the-app).
 
 | File | Purpose |
 |---|---|
@@ -22,7 +30,10 @@ rehearsal.
 | `verifier.Dockerfile` | Image for `mandatex-verifier`. Build context is the **repository root** |
 | `railway.verifier.json` | Railway config-as-code for `mandatex-verifier` |
 | `verifier.env.example` | Environment contract for `mandatex-verifier`, including key generation |
-| `rehearse.mjs` | Boots both services as separate processes and checks the trust boundary |
+| `ui.Dockerfile` | Image for `mandatex-ui`. Build context is the **repository root**. Runtime stage carries no `node_modules` |
+| `railway.ui.json` | Railway config-as-code for `mandatex-ui` |
+| `ui.env.example` | Environment contract for `mandatex-ui` |
+| `rehearse.mjs` | Boots the verifier and app as separate processes and checks the trust boundary |
 
 ---
 
@@ -32,9 +43,11 @@ rehearsal.
 |---|---|
 | `mandatex-app` image | **builds and runs** — 353 MB. Boot guards fire, routes serve, SIGTERM exits 0 |
 | `mandatex-verifier` image | **builds and runs** — 601 MB. Boot guards fire, key never appears in a response, SIGTERM exits 0 |
+| `mandatex-ui` image | **builds and runs** — 347 MB, of which essentially all is the Node base image. Verified against the app over a private network: renders, `/healthz` and `/readyz` answer, four boot guards fire, SIGTERM exits 0, PID 1 is `node` |
 | Lockstep proof | **exercised end to end.** `node deploy/rehearse.mjs` → 27/27 across two processes; also verified as two containers on a private network |
-| Either service on Railway | not yet pushed |
+| Any service on Railway | not yet pushed |
 | `POST /v1/evaluate` on the verifier | returns 503 until agent artifacts exist — see [What is still missing](#what-is-still-missing) |
+| The deployed UI's content | **empty but honest** until those artifacts exist — see the same section |
 
 ## The lockstep proof
 
@@ -94,6 +107,69 @@ Verified locally on this image:
 - `/v1/fixtures` → `404` under `NODE_ENV=production`
 - `docker stop` → `closed cleanly`, exit `0` (not SIGKILL)
 
+### The UI
+
+```bash
+docker build -f deploy/ui.Dockerfile -t mandatex-ui .
+
+# The UI needs an app to read. Give the app an .internal alias so the UI's
+# production URL guard is satisfied without weakening it.
+docker network create mx-net
+docker run -d --name mx-app --network mx-net --network-alias mandatex-app.internal \
+  -e MANDATEX_TRUST_KEY_ID=mandatex-verifier-1 \
+  -e MANDATEX_TRUST_SPKI_DER_HEX=... \
+  -e MANDATEX_TRUST_KEY_FINGERPRINT_SHA256=... \
+  -e MANDATEX_TRUST_POLICY_SHA256=... \
+  mandatex-app
+
+docker run --rm --network mx-net -p 8081:8081 \
+  -e MANDATEX_API_URL=http://mandatex-app.internal:8080 \
+  mandatex-ui
+```
+
+Verified on this image, in two containers on a private network:
+
+- `/healthz` → `200 {"status":"ok"}`; `/readyz` → `200 {"status":"ready"}`, having
+  actually reached the app over `.internal`
+- `GET /` → `200`, renders the mandate form
+- in production it correctly reports *"No candidate attestations are available"*, and
+  `POST /evaluate` answers `503 Unavailable`, because the app's `/v1/fixtures` is
+  `404` there — see [What is still missing](#what-is-still-missing)
+- no `MANDATEX_API_URL` → exits `78`
+- `MANDATEX_SIGNING_KEY` set → exits `78`
+- a PKCS#8 private key in a variable named `UI_THEME` → exits `78`
+- `MANDATEX_API_URL=http://127.0.0.1:8080` → exits `78`, see below
+- no `node_modules` and no `/srv/fixtures` in the image; runs as `uid=1000(node)`
+- PID 1 is `node dist/server.js`; `docker stop` → `closed cleanly`, exit `0`
+
+### Why the UI is its own service, and not a second process in the app
+
+Mounting the UI into the `mandatex-app` container was the intended plan. It was
+rejected on two concrete blockers, both measured rather than assumed:
+
+**The UI refuses a loopback API URL in production.** Two processes in one container
+must talk over loopback, and `MANDATEX_API_URL=http://127.0.0.1:8080` exits `78`:
+
+```
+MANDATEX_API_URL must be https in production unless it is a *.internal
+private-network address, received http://127.0.0.1:8080
+```
+
+The waiver in `loadUiConfig` covers the `.internal` suffix and nothing else. Mounting
+would mean widening a security guard to suit deployment convenience, which is the
+wrong direction — the guard exists so that a plaintext hop is only ever possible on a
+network that is not externally routable.
+
+**Two node processes cannot both be PID 1.** Running a pair inside one container needs
+a supervisor as PID 1 — a shell wrapper or an init like `tini`. Both break the property
+that Railway's SIGTERM reaches the graceful-shutdown handler directly, which is exactly
+what makes a redeploy clean rather than a SIGKILL. That property is load-bearing for the
+lockstep pair and worth more than a saved service.
+
+Against that, the cost of a third service turned out to be close to nothing: the UI has
+**no trust pins**, so there is no third set of values to keep in lockstep, and it idles
+at 18 MiB.
+
 ## Railway setup
 
 1. Create a project, connect the repository.
@@ -106,7 +182,6 @@ Verified locally on this image:
 3. Add a service named **`mandatex-app`**.
    - Root directory: `/` (the Dockerfile needs the whole tree — see below)
    - Config-as-code path: `deploy/railway.app.json`
-   - Config-as-code path: `deploy/railway.app.json`
 4. Read `publicKeySpkiDerHex` and `publicKeyFingerprintSha256` from the verifier's
    `GET /v1/trust` and set them as the app's `MANDATEX_TRUST_*` pins. Take them from
    the **running verifier**, not from what you believe you configured — that is what
@@ -115,10 +190,21 @@ Verified locally on this image:
    `MANDATEX_VERIFIER_URL=http://mandatex-verifier.railway.internal:8080`. Do
    **not** set any signing key on the app; it scans its own environment and refuses
    to boot if it finds one.
-6. Generate a public domain for `mandatex-app` only.
+6. Generate a public domain for `mandatex-app`.
 7. Check the app's `/readyz` is `200` with `checks.verifier.status = "ok"`. If it
    is `503 key_mismatch`, the pins are stale — step 4 was skipped or run against a
    previous verifier deploy.
+8. Add a service named **`mandatex-ui`**, last, because it reads the app.
+   - Root directory: `/`
+   - Config-as-code path: `deploy/railway.ui.json`
+   - Set `MANDATEX_API_URL=http://mandatex-app.railway.internal:8080` from
+     `ui.env.example`. Set no trust pins and no key; it needs neither.
+   - Generate a public domain for it. **This is the URL to give judges.**
+
+Steps 1–7 are unchanged and must stay in that order: the app's pins come from the
+running verifier, so the verifier has to exist first. The UI is appended rather than
+inserted because it depends on the app answering, and it holds nothing that the other
+two need.
 
 ### Why the build context is the repository root
 
@@ -141,6 +227,20 @@ So the deploy gate is liveness (`/healthz`, "the process is up") and `/readyz` i
 the operator signal — the thing to check after a deploy, and the thing that turns
 red if the verifier rotates its key without the app being updated.
 
+**Each service's own `/healthz` is authoritative for its own deploy gate, and only
+that.** All three expose one, and none of them should gate on another's:
+
+| Service | `/healthz` means | `/readyz` means |
+|---|---|---|
+| `mandatex-verifier` | process is up | it can **sign** — 200 even with no agent configured |
+| `mandatex-app` | process is up | the verifier's advertised key matches the app's pin |
+| `mandatex-ui` | process is up | the app it reads is answering |
+
+The UI's `/readyz` deliberately reports `degraded` when the app is unreachable, so an
+API outage does not present as a UI bug. It is still not the deploy gate, for the same
+deadlock reason: the UI is deployed last, and gating its first deploy on the app being
+ready would couple three services into one failure.
+
 ## Cost
 
 Railway Hobby is $5/mo including $5 of usage credit, billed on **measured** RAM
@@ -153,15 +253,18 @@ Measured in the running containers at idle:
 |---|---|---|
 | `mandatex-app` | **36 MiB** | No framework; Core's only runtime dependency is zod |
 | `mandatex-verifier` | **81 MiB** | Carries `viem` and `@bnbagent/sdk` through `agent-supply-verifier` |
+| `mandatex-ui` | **18 MiB** | The smallest of the three: its runtime stage has **no `node_modules` at all** |
 
-Together ≈ **0.12 GB-month ≈ $1.17/mo** at idle, inside the included $5 credit.
+Together ≈ **0.135 GB-month ≈ $1.35/mo** at idle, inside the included $5 credit. The UI
+adds 18 MiB and about $0.18/mo, which is the whole cost of not mounting it.
 
 Two corrections to earlier figures, both recorded rather than quietly replaced:
 `plan.md` §5.3 originally assumed ~150 MB per service (≈$3/mo), which was too high;
 the $0.50/mo figure that replaced it was measured on the **app alone** and applied
 to both services, which was too low — the verifier is more than twice the app's
-footprint because of its chain dependencies. $1.17/mo is the first figure measured
-from both services actually running.
+footprint because of its chain dependencies. The $1.17/mo figure that followed was
+measured from the verifier and app actually running, and is superseded here only
+because a third service now exists.
 
 Load will raise this. The headroom before the $5 credit is exhausted is large.
 
@@ -179,6 +282,14 @@ the trust boundary could not be stood up until the whole supply pipeline was
 finished, which is backwards: the boundary is what everything else is verified
 against. Everything except evaluation works without them, including the entire
 lockstep proof above.
+
+**So the deployed UI is empty until they exist, and says so.** `GET /v1/fixtures` on
+the app is unconditionally disabled under `NODE_ENV=production` and the vectors are in
+no production image, so the UI renders its mandate form with a *"No candidate
+attestations are available"* banner and `POST /evaluate` answers `503`. Verified in the
+built images. This is the correct behaviour for an interface that submits attestations
+issued by the verifier and cannot mint them — but anyone opening the public URL before
+artifacts exist should expect an honest empty state rather than assume a failed deploy.
 
 **A first policy pin.** The app requires `MANDATEX_TRUST_POLICY_SHA256` at boot,
 and the verifier can only derive that value once artifacts are present — so on the
@@ -198,10 +309,14 @@ than a placeholder.
 | Verifier not publicly reachable | No Railway domain generated for it; app reaches it over `*.railway.internal` |
 | Plaintext internal traffic | Allowed only for `.internal` hosts, which Railway does not route externally. Public URLs must be https |
 | Key rotation without app update | Caught by `/readyz` fingerprint comparison |
-| Container runs unprivileged | `USER node` on both images |
+| Container runs unprivileged | `USER node` on all three images |
 | Verifier never echoes its key | Every response body checked against the real secret's four encodings before it reaches the socket |
 | Verifier never logs its environment | Boot log names the key by id and public fingerprint only |
 | Signing key absent from image layers | No `ARG`, no `COPY`, no default — env var only, at run time |
+| UI holds no signing key | Boot guard scans env by name **and** content; exits 78 |
+| UI decides no trust | It has no `MANDATEX_TRUST_*` variables, so "which signatures count" is decided in exactly one place |
+| UI ships no dependencies | Runtime stage has no `node_modules`; the only non-relative import in its graph is `node:http`, so there is no third-party code in the public-facing container |
+| UI renders no external resources | CSP is `default-src 'none'` with no `<script>` anywhere; zero external fonts or images. Graphics are inline SVG, so the only `w3.org` string in the output is an XML namespace, which is never fetched |
 
 Plaintext `http://` to `*.railway.internal` is deliberate: Railway's private
 network does not terminate TLS, and those names are not resolvable from outside
