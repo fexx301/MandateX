@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@bnbagent/sdk": "0.5.0",
+    "@mandatex/category-adapters": "file:../category-adapters",
     "viem": "^2.55.16",
     "zod": "^3.25.76"
   },

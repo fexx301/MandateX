@@ -17,6 +17,10 @@ export * from "./preview/plan.js";
 export * from "./preview/rpc.js";
 export * from "./preview/schema.js";
 export * from "./preview/validate.js";
+export * from "./category/execute.js";
+export * from "./category/policy.js";
+export * from "./category/rpc.js";
+export * from "./category/schema.js";
 export * from "./activation/capture.js";
 export {
   ACTIVATION_CONFIRMATION_DEPTH,

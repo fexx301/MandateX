@@ -2,11 +2,11 @@ import { canonicalSha256 } from "@mandatex/marketplace-core";
 import { z } from "zod";
 
 /**
- * Inactive service-owned deployment identity for the category adapters.
+ * Service-owned deployment identity for signer-free category execution.
  *
- * This is deliberately a separate contract from the active verifier-policy
- * manifest. The verifier does not import adapter code from this package; it
- * cross-checks this closed-world description before a future activation.
+ * This remains separate from the locked v1 attestation policy. The category
+ * verifier policy v2 binds this closed-world description and cross-checks it
+ * against the adapter executor before any evidence is produced.
  */
 export const MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA =
   "mandatex.marketplace.category-adapter-deployment.v2" as const;
@@ -256,7 +256,7 @@ const normalizedCategoryAdapterDeploymentManifestSchema = z
           context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["adapters", index, "enabled"],
-            message: `at most one adapter may be enabled for category ${category} until trusted provenance carries an adapter ID`,
+            message: `at most one adapter may be enabled for category ${category} until the category request can select an adapter ID`,
           });
         }
       }

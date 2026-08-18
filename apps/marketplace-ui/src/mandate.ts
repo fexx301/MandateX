@@ -109,19 +109,19 @@ export const CATEGORY_OPTIONS: readonly CategoryOption[] = Object.freeze([
   { value: "rebalancing", label: "Rebalancing (PancakeSwap v3 position)", supported: true },
   {
     value: "grid",
-    label: "Grid (unsupported in Core v1)",
+    label: "Grid (adapter built, registration pending)",
     supported: false,
     reason: "CATEGORY_GRID_UNSUPPORTED",
   },
   {
     value: "yield",
-    label: "Yield (unsupported in Core v1)",
+    label: "Yield (adapter built, registration pending)",
     supported: false,
     reason: "CATEGORY_YIELD_UNSUPPORTED",
   },
   {
     value: "health",
-    label: "Lending health (unsupported in Core v1)",
+    label: "Lending health (adapter built, registration pending)",
     supported: false,
     reason: "CATEGORY_HEALTH_UNSUPPORTED",
   },

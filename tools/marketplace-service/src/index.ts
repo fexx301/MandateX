@@ -31,6 +31,19 @@ export {
   type MarketplaceVerifierRuntimeOptions,
 } from "./runtime.js";
 export {
+  MARKETPLACE_VERIFIER_POLICY_V2_PROFILES,
+  MARKETPLACE_VERIFIER_POLICY_V2_SCHEMA,
+  marketplaceVerifierPolicyV2Manifest,
+  marketplaceVerifierPolicyV2Sha256,
+  type MarketplaceVerifierPolicyV2Identity,
+  type MarketplaceVerifierPolicyV2Manifest,
+} from "./category-verifier-policy.js";
+export {
+  createMarketplaceCategoryVerifierRuntime,
+  type MarketplaceCategoryVerifierRuntime,
+  type MarketplaceCategoryVerifierRuntimeOptions,
+} from "./category-runtime.js";
+export {
   MarketplaceServiceError,
   type MarketplaceServiceErrorCode,
 } from "./errors.js";

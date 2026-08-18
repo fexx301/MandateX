@@ -1,8 +1,8 @@
 # MandateX marketplace service
 
-This package is the verifier-runtime seam for Marketplace Evaluation Attestation
-v2. It is intentionally separate from the web/API evaluator and from
-Marketplace Core.
+This package owns the verifier-runtime boundaries for Marketplace Evaluation
+Attestation v2 and category-adapter execution. It is intentionally separate
+from the web/API evaluator and from Marketplace Core.
 
 `createMarketplaceVerifierRuntime()` owns the only public operation:
 `evaluateAndAttest()`. Manifest, passive-report, trust-policy, transport, and
@@ -26,6 +26,15 @@ hash, then passes the resulting canonical wire string to Marketplace Core v2.
 This package does not authorize activation, reserve replay markers, fund tasks,
 broadcast transactions, or hold wallet authority.
 
+`createMarketplaceCategoryVerifierRuntime()` is a separate signer-free boundary
+whose only operation is `evaluateCategory()`. Construction binds a strict
+four-adapter deployment into verifier policy v2, then cross-checks the service
+and verifier deployment digests. Each call selects the one enabled adapter for
+the requested category, executes its exact bounded BSC read contract, recomputes
+the evidence and artifact hashes, and returns only a result carrying trusted
+in-process provenance. This runtime exposes no private key, attestation issuer,
+wire envelope, or generic signing method.
+
 The pinned verifier-policy hash is a versioned Marketplace Core canonical hash
 of the passive policy fingerprint, the complete quote-trust-file digest, the
 quote-trust and preview-evaluation contract identifiers, the active quote
@@ -37,24 +46,28 @@ new hash and a coordinated evaluator repin. Runtime/build identity is outside
 this v1 manifest and is controlled by the deployment boundary.
 
 `marketplaceVerifierPolicyManifest()` exposes the exact object hashed by that
-active v1 policy, and its locked digest remains unchanged. Category-adapter
-deployment identity is intentionally separate for now:
+active v1 policy, and its locked digest remains unchanged. Category execution
+uses a separate policy version: `marketplaceVerifierPolicyV2Manifest()` binds
+the unchanged v1 manifest together with the category execution contracts,
+transport limits, block-pinning profile, allowed selectors, and category
+deployment digest.
+
 `parseMarketplaceCategoryAdapterDeploymentManifest()` validates and freezes a
 strict v2 manifest, while `marketplaceCategoryAdapterDeploymentSha256()` hashes
 the normalized addresses, thresholds, adapter and evidence identifiers,
 adapter-specific validation profiles, and exact ordered read selectors. The
 manifest is keyed by adapter ID and contains exactly four entries: grid, yield,
-Aave health, and Venus health. It does not add category data to the active
-policy, run adapters, or enable any category. Activation still requires
-verifier-side evidence integration, binding the selected adapter identity into
-trusted result provenance, a new active policy digest, and a coordinated
-signer/evaluator repin.
+Aave health, and Venus health. The signer-free category runtime consumes this
+manifest and can execute enabled adapters, but it does not mutate the locked v1
+attestation policy, issue category attestations, or make Marketplace Core accept
+category evidence. Those remain separate contracts.
 
 `enabled: false` entries omit configuration and are hashed as disabled; omission
 is never treated as a default. At most one adapter may be enabled for a category
-in this generation because the current mandate and signed category projection
-carry only `category`, not an adapter selector. Aave and Venus therefore cannot
-be enabled together until a future provenance contract carries that choice.
+in this generation because `evaluateCategory()` accepts a category, not a
+caller-selected adapter ID. The execution artifact binds the chosen adapter ID,
+but deployment policy owns that choice. Aave and Venus therefore cannot be
+enabled together in one deployment.
 Venus requires `comptrollerAddress`, `accountAddress`,
 `borrowMarketAddress`, and `minLiquidityUsdScaled`; there is no absolute-liquidity
 default. The Venus metric metadata explicitly includes the monitored-market

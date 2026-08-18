@@ -47,6 +47,19 @@ export const BSC_PREVIEW_RPC_LIMITS = Object.freeze({
   maxResponseBytes: 64 * 1024,
 });
 
+/** Limits for the isolated category-evidence reader. */
+export const BSC_CATEGORY_RPC_LIMITS = Object.freeze({
+  maxRequestBytes: 16 * 1024,
+  maxResponseBytes: 64 * 1024,
+});
+
+export const BSC_CATEGORY_RPC_METHODS = [
+  "eth_chainId",
+  "eth_blockNumber",
+  "eth_getBlockByNumber",
+  "eth_call",
+] as const;
+
 export const BSC_ACTIVATION_RPC_LIMITS = Object.freeze({
   maxRequestBytes: 24 * 1024,
   maxResponseBytes: 128 * 1024,
@@ -126,6 +139,32 @@ export const BSC_PREVIEW_STATE_READ_SELECTORS = Object.freeze([
   "0xdd62ed3e", // allowance(address,address)
 ] as const);
 
+/** Static selectors category adapters are allowed to call on BSC. */
+export const BSC_CATEGORY_STATE_READ_SELECTORS = Object.freeze([
+  "0x3850c7bd", // slot0()
+  "0x01e1d114", // totalAssets()
+  "0x18160ddd", // totalSupply()
+  "0xbf92857c", // getUserAccountData(address)
+  "0x5ec88c79", // getAccountLiquidity(address)
+  "0xabfceffc", // getAssetsIn(address)
+  "0x95dd9193", // borrowBalanceStored(address)
+] as const);
+
+const BSC_CATEGORY_STATE_READ_SELECTOR_SET = new Set<string>(
+  BSC_CATEGORY_STATE_READ_SELECTORS,
+);
+const BSC_CATEGORY_NO_ARGUMENT_SELECTOR_SET = new Set<string>([
+  "0x3850c7bd",
+  "0x01e1d114",
+  "0x18160ddd",
+]);
+const BSC_CATEGORY_ADDRESS_ARGUMENT_SELECTOR_SET = new Set<string>([
+  "0xbf92857c",
+  "0x5ec88c79",
+  "0xabfceffc",
+  "0x95dd9193",
+]);
+
 const BSC_PREVIEW_STATE_READ_SELECTOR_SET = new Set<string>(
   BSC_PREVIEW_STATE_READ_SELECTORS,
 );
@@ -174,6 +213,33 @@ export type BscPreviewRpcRoute =
         rpcMethod: "eth_call";
         approvedCaller: string;
         approvedCalldataSha256: string;
+        approvedBlockHash: string;
+      }>);
+
+type BscCategoryRpcCommon = Readonly<{
+  kind: "bsc-category-rpc";
+  method: "POST";
+  url: string;
+  body: string;
+}>;
+
+export type BscCategoryRpcRoute =
+  | (BscCategoryRpcCommon &
+      Readonly<{ purpose: "chain-id"; rpcMethod: "eth_chainId" }>)
+  | (BscCategoryRpcCommon &
+      Readonly<{ purpose: "head-block-number"; rpcMethod: "eth_blockNumber" }>)
+  | (BscCategoryRpcCommon &
+      Readonly<{
+        purpose: "block-header";
+        rpcMethod: "eth_getBlockByNumber";
+        approvedBlockNumber: string;
+      }>)
+  | (BscCategoryRpcCommon &
+      Readonly<{
+        purpose: "state-read";
+        rpcMethod: "eth_call";
+        approvedTargets: readonly [string];
+        approvedCalldata: string;
         approvedBlockHash: string;
       }>);
 
@@ -268,6 +334,7 @@ export type TransportRoute =
       body: string;
     }>
   | BscPreviewRpcRoute
+  | BscCategoryRpcRoute
   | BscActivationRpcRoute
   | Readonly<{
       kind: "a2a-quote";
@@ -464,6 +531,10 @@ function stripIpv6Brackets(value: string): string {
 }
 
 export function validateTransportRoute(route: TransportRoute): URL {
+  return validateTransportRouteSnapshot(snapshotTransportRoute(route));
+}
+
+function validateTransportRouteSnapshot(route: TransportRoute): URL {
   let url: URL;
   try {
     url = new URL(route.url);
@@ -534,6 +605,15 @@ export function validateTransportRoute(route: TransportRoute): URL {
       throw new TransportError("RPC_METHOD_NOT_ALLOWED");
     }
     assertPreviewRpcRoute(route);
+  } else if (route.kind === "bsc-category-rpc") {
+    if (route.method !== "POST") throw new TransportError("METHOD_NOT_ALLOWED");
+    if (url.origin !== BSC_MAINNET_RPC_ORIGIN || url.pathname !== "/") {
+      throw new TransportError("ORIGIN_NOT_ALLOWED");
+    }
+    if (!BSC_CATEGORY_RPC_METHODS.includes(route.rpcMethod)) {
+      throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+    }
+    assertCategoryRpcRoute(route);
   } else if (route.kind === "bsc-activation-rpc") {
     if (route.method !== "POST") throw new TransportError("METHOD_NOT_ALLOWED");
     if (url.origin !== BSC_MAINNET_RPC_ORIGIN || url.pathname !== "/") {
@@ -744,6 +824,104 @@ function assertPreviewRpcRoute(route: BscPreviewRpcRoute): void {
   }
 }
 
+function assertCategoryRpcRoute(route: BscCategoryRpcRoute): void {
+  assertCategoryRouteKeys(route);
+  const parsed = parseStrictRpcBody(route.body, route.rpcMethod);
+
+  switch (route.purpose) {
+    case "chain-id":
+      if (
+        route.rpcMethod !== "eth_chainId" ||
+        parsed.params.length !== 0
+      ) {
+        throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+      }
+      return;
+    case "head-block-number":
+      if (
+        route.rpcMethod !== "eth_blockNumber" ||
+        parsed.params.length !== 0
+      ) {
+        throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+      }
+      return;
+    case "block-header":
+      if (
+        route.rpcMethod !== "eth_getBlockByNumber" ||
+        !isCanonicalHexQuantity(route.approvedBlockNumber) ||
+        parsed.params.length !== 2 ||
+        parsed.params[0] !== route.approvedBlockNumber ||
+        parsed.params[1] !== false
+      ) {
+        throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+      }
+      return;
+    case "state-read": {
+      const target = assertSingletonApprovedTarget(route.approvedTargets);
+      if (
+        route.rpcMethod !== "eth_call" ||
+        parsed.params.length !== 2 ||
+        !isCategoryCalldataAllowed(route.approvedCalldata)
+      ) {
+        throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+      }
+      const call = parsed.params[0];
+      if (
+        !isRecord(call) ||
+        !hasExactKeys(call, ["data", "to"]) ||
+        call.to !== target ||
+        call.data !== route.approvedCalldata
+      ) {
+        throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+      }
+      assertCanonicalBlockSelector(parsed.params[1], route.approvedBlockHash);
+      return;
+    }
+    default:
+      return assertNever(route);
+  }
+}
+
+function assertCategoryRouteKeys(route: BscCategoryRpcRoute): void {
+  const common = ["body", "kind", "method", "purpose", "rpcMethod", "url"];
+  let expected: readonly string[];
+  switch (route.purpose) {
+    case "chain-id":
+    case "head-block-number":
+      expected = common;
+      break;
+    case "block-header":
+      expected = [...common, "approvedBlockNumber"];
+      break;
+    case "state-read":
+      expected = [
+        ...common,
+        "approvedBlockHash",
+        "approvedCalldata",
+        "approvedTargets",
+      ];
+      break;
+    default:
+      return assertNever(route);
+  }
+  if (!hasExactKeys(route as unknown as Record<string, unknown>, expected)) {
+    throw new TransportError("RPC_METHOD_NOT_ALLOWED");
+  }
+}
+
+function isCategoryCalldataAllowed(value: unknown): value is string {
+  if (typeof value !== "string" || !isCanonicalHexData(value)) return false;
+  const selector = value.slice(0, 10);
+  if (!BSC_CATEGORY_STATE_READ_SELECTOR_SET.has(selector)) return false;
+  if (BSC_CATEGORY_NO_ARGUMENT_SELECTOR_SET.has(selector)) {
+    return value.length === 10;
+  }
+  return (
+    BSC_CATEGORY_ADDRESS_ARGUMENT_SELECTOR_SET.has(selector) &&
+    /^0{24}[0-9a-f]{40}$/.test(value.slice(10))
+  );
+}
+
 function assertActivationRpcRoute(route: BscActivationRpcRoute): void {
   assertActivationRouteKeys(route);
   const parsed = parseStrictRpcBody(route.body, route.rpcMethod);
@@ -906,6 +1084,7 @@ function parseStrictRpcBody(
   body: string,
   expectedMethod:
     | (typeof BSC_PREVIEW_RPC_METHODS)[number]
+    | (typeof BSC_CATEGORY_RPC_METHODS)[number]
     | (typeof BSC_ACTIVATION_RPC_METHODS)[number],
 ): Readonly<{ params: readonly unknown[] }> {
   let parsed: unknown;
@@ -929,8 +1108,9 @@ function parseStrictRpcBody(
   return { params: parsed.params };
 }
 
-function assertSingletonApprovedTarget(targets: readonly [string]): string {
+function assertSingletonApprovedTarget(targets: unknown): string {
   if (
+    !Array.isArray(targets) ||
     targets.length !== 1 ||
     !isCanonicalAddress(targets[0]) ||
     targets[0] === "0x0000000000000000000000000000000000000000"
@@ -1107,24 +1287,30 @@ export class PinnedHttpsTransport {
   }
 
   async request(route: TransportRoute): Promise<BoundedHttpResponse> {
-    const url = validateTransportRoute(route);
-    const requestBody = requestBodyForRoute(route);
+    const routeSnapshot = snapshotTransportRoute(route);
+    const url = validateTransportRouteSnapshot(routeSnapshot);
+    const requestBody = requestBodyForRoute(routeSnapshot);
     const requestBytes =
       requestBody === undefined ? 0 : Buffer.byteLength(requestBody, "utf8");
     const maxRequestBytes =
-      route.kind === "a2a-quote"
+      routeSnapshot.kind === "a2a-quote"
         ? Math.min(this.#limits.maxRequestBytes, ACTIVE_QUOTE_LIMITS.maxRequestBytes)
-        : route.kind === "bsc-quote-rpc"
+        : routeSnapshot.kind === "bsc-quote-rpc"
           ? Math.min(
               this.#limits.maxRequestBytes,
               ACTIVE_QUOTE_RPC_LIMITS.maxRequestBytes,
             )
-          : route.kind === "bsc-preview-rpc"
+          : routeSnapshot.kind === "bsc-preview-rpc"
             ? Math.min(
                 this.#limits.maxRequestBytes,
                 BSC_PREVIEW_RPC_LIMITS.maxRequestBytes,
               )
-            : route.kind === "bsc-activation-rpc"
+            : routeSnapshot.kind === "bsc-category-rpc"
+              ? Math.min(
+                  this.#limits.maxRequestBytes,
+                  BSC_CATEGORY_RPC_LIMITS.maxRequestBytes,
+                )
+            : routeSnapshot.kind === "bsc-activation-rpc"
               ? Math.min(
                   this.#limits.maxRequestBytes,
                   BSC_ACTIVATION_RPC_LIMITS.maxRequestBytes,
@@ -1144,25 +1330,36 @@ export class PinnedHttpsTransport {
     const pinned = selectPinnedAddress(answers);
 
     const maxResponseBytes =
-      route.kind === "a2a-quote"
+      routeSnapshot.kind === "a2a-quote"
         ? Math.min(this.#limits.maxResponseBytes, ACTIVE_QUOTE_LIMITS.maxResponseBytes)
-        : route.kind === "bsc-quote-rpc"
+        : routeSnapshot.kind === "bsc-quote-rpc"
           ? Math.min(
               this.#limits.maxResponseBytes,
               ACTIVE_QUOTE_RPC_LIMITS.maxResponseBytes,
             )
-          : route.kind === "bsc-preview-rpc"
+          : routeSnapshot.kind === "bsc-preview-rpc"
             ? Math.min(
                 this.#limits.maxResponseBytes,
                 BSC_PREVIEW_RPC_LIMITS.maxResponseBytes,
               )
-            : route.kind === "bsc-activation-rpc"
+            : routeSnapshot.kind === "bsc-category-rpc"
+              ? Math.min(
+                  this.#limits.maxResponseBytes,
+                  BSC_CATEGORY_RPC_LIMITS.maxResponseBytes,
+                )
+            : routeSnapshot.kind === "bsc-activation-rpc"
               ? Math.min(
                   this.#limits.maxResponseBytes,
                   BSC_ACTIVATION_RPC_LIMITS.maxResponseBytes,
                 )
         : this.#limits.maxResponseBytes;
-    return this.#requestPinned(url, route, pinned, requestBody, maxResponseBytes);
+    return this.#requestPinned(
+      url,
+      routeSnapshot,
+      pinned,
+      requestBody,
+      maxResponseBytes,
+    );
   }
 
   async #requestPinned(
@@ -1334,6 +1531,36 @@ export class PinnedHttpsTransport {
   }
 }
 
+function snapshotTransportRoute(route: unknown): TransportRoute {
+  try {
+    if (!isRecord(route)) throw new TransportError("METHOD_NOT_ALLOWED");
+    const snapshot = Object.create(null) as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(route)) {
+      if (typeof key !== "string") {
+        throw new TransportError("METHOD_NOT_ALLOWED");
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(route, key);
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        descriptor.enumerable !== true
+      ) {
+        throw new TransportError("METHOD_NOT_ALLOWED");
+      }
+      Object.defineProperty(snapshot, key, {
+        value: descriptor.value,
+        enumerable: true,
+        writable: false,
+        configurable: false,
+      });
+    }
+    return Object.freeze(snapshot) as unknown as TransportRoute;
+  } catch (cause) {
+    if (cause instanceof TransportError) throw cause;
+    throw new TransportError("METHOD_NOT_ALLOWED");
+  }
+}
+
 function requestBodyForRoute(route: TransportRoute): string | undefined {
   switch (route.kind) {
     case "scan-detail":
@@ -1342,6 +1569,7 @@ function requestBodyForRoute(route: TransportRoute): string | undefined {
     case "bsc-rpc":
     case "bsc-quote-rpc":
     case "bsc-preview-rpc":
+    case "bsc-category-rpc":
     case "bsc-activation-rpc":
     case "a2a-quote":
       return route.body;

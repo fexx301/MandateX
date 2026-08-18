@@ -23,6 +23,15 @@ import {
   venusHealthAdapterConfigSchema,
 } from "../../category-adapters/dist/policy.js";
 import {
+  CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA as VERIFIER_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  CATEGORY_ADAPTER_VALIDATION_PROFILES as VERIFIER_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  categoryAdapterDeploymentSha256 as verifierCategoryAdapterDeploymentSha256,
+  parseCategoryAdapterDeploymentManifest as parseVerifierCategoryAdapterDeploymentManifest,
+} from "../../agent-supply-verifier/src/category/policy.ts";
+import {
+  BSC_CATEGORY_STATE_READ_SELECTORS,
+} from "../../agent-supply-verifier/src/transport/http.ts";
+import {
   MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
   MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
   marketplaceCategoryAdapterDeploymentSha256,
@@ -108,6 +117,24 @@ const disabledManifest = {
 };
 
 const parsed = parseMarketplaceCategoryAdapterDeploymentManifest(disabledManifest);
+const verifierParsed = parseVerifierCategoryAdapterDeploymentManifest(disabledManifest);
+assert.equal(
+  VERIFIER_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+);
+assert.deepEqual(
+  VERIFIER_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+);
+assert.deepEqual(verifierParsed, parsed);
+assert.equal(
+  verifierCategoryAdapterDeploymentSha256(disabledManifest),
+  marketplaceCategoryAdapterDeploymentSha256(disabledManifest),
+);
+assert.deepEqual(
+  BSC_CATEGORY_STATE_READ_SELECTORS,
+  descriptors.flatMap((entry) => entry.reads.map((read) => read.selector)),
+);
 assert.deepEqual(
   parsed.adapters.map((entry) => entry.adapterId),
   [
@@ -206,6 +233,14 @@ const venusEnabled = {
 };
 assert.notEqual(
   marketplaceCategoryAdapterDeploymentSha256(disabledManifest),
+  marketplaceCategoryAdapterDeploymentSha256(venusEnabled),
+);
+assert.deepEqual(
+  parseVerifierCategoryAdapterDeploymentManifest(venusEnabled),
+  parseMarketplaceCategoryAdapterDeploymentManifest(venusEnabled),
+);
+assert.equal(
+  verifierCategoryAdapterDeploymentSha256(venusEnabled),
   marketplaceCategoryAdapterDeploymentSha256(venusEnabled),
 );
 
