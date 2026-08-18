@@ -191,7 +191,16 @@ const venusEnabled = {
   ...disabledManifest,
   adapters: disabledManifest.adapters.map((entry) =>
     entry.adapterId === VENUS_HEALTH_ADAPTER_ID
-      ? { ...entry, enabled: true, configuration: venusConfig }
+      ? {
+          ...entry,
+          enabled: true,
+          configuration: {
+            comptrollerAddress: venusConfig.comptrollerAddress,
+            accountAddress: venusConfig.accountAddress,
+            borrowMarketAddress: venusConfig.borrowMarketAddress,
+            minLiquidityUsdScaled: venusConfig.minLiquidityUsdScaled,
+          },
+        }
       : entry,
   ),
 };
