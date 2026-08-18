@@ -14,7 +14,7 @@ and it should keep doing so until the registration described below happens.
 
 ## Status
 
-71/71 checks pass (`corepack pnpm smoke`). No network, no clock, no chain — every
+97/97 checks pass (`corepack pnpm smoke`). No network, no clock, no chain — every
 on-chain read is served by return data constructed byte by byte in the suite,
 because the branches that matter most cannot be produced on demand from a live
 endpoint: a tick outside the legal range, a vault with zero shares, Aave's no-debt
@@ -32,7 +32,7 @@ Core's `canonicalSha256`, and the narrowed evidence is parsed by Core's own
 | `grid` | `pancakeswap-v3-grid-v1` | `mandatex.category.grid-evidence.v1` | 1 | `slot0().tick` vs. the declared grid band |
 | `yield` | `erc4626-yield-v1` | `mandatex.category.yield-evidence.v1` | 2 | `totalAssets/totalSupply` share price vs. a floor |
 | `health` | `aave-v3-health-v1` | `mandatex.category.health-evidence.v1` | 1 | `getUserAccountData().healthFactor` vs. a floor |
-| `health` | `venus-health-v1` | `mandatex.category.venus-health-evidence.v1` | 2 | `getAccountLiquidity()` liquidity/shortfall vs. a floor |
+| `health` | `venus-health-v1` | `mandatex.category.venus-health-evidence.v1` | 3 | `getAccountLiquidity()` liquidity/shortfall plus monitored-market `borrowBalanceStored()` vs. a floor |
 
 **`CATEGORY_ADAPTER_REGISTRY` is keyed by adapter ID, not by category.** `health`
 has two entries. That is not redundancy: BSC has two major lending protocols with
@@ -69,12 +69,13 @@ six.
 
 Two consequences that shape the adapter:
 
-**It needs a second read.** Venus reports both "no position at all" and "a position
+**It needs more than one read.** Venus reports both "no position at all" and "a position
 with exactly zero buffer" as `liquidity == 0 && shortfall == 0`. Those deserve
 opposite verdicts — nothing to maintain, versus the riskiest non-liquidatable state
 there is — and one call cannot tell them apart. `getAssetsIn` disambiguates by
 returning the markets entered. Without it the adapter would treat a maximally
-leveraged position and an empty account identically.
+leveraged position and an empty account identically. A third read then closes the
+no-debt gap; see below.
 
 **Its metric is weaker than Aave's, and that is recorded rather than hidden.** An
 absolute USD floor does not scale with position size the way a health factor does:
@@ -88,21 +89,31 @@ Venus also reports failure **in band** — a nonzero first word rather than a re
 failed computation returns zeros, so skipping that check would make an error look
 like a position with no buffer.
 
-### The Venus adapter's guarantee is narrower than Aave's — known, not hidden
+### The Venus no-debt gap is closed — resolved 2026-08-18
 
-`aave-v3-health-v1` reads `totalDebtBase` directly and refuses the no-debt case
-outright. `venus-health-v1` detects **no position**, which is not the same thing:
-`getAssetsIn` returns the markets an account has *entered*, and enabling an asset as
-collateral counts even if nothing was ever borrowed against it. So a collateral-only
-Venus account has `marketsEntered > 0`, a large `liquidity`, no shortfall — and
-**passes**, despite having no debt to maintain and a health mandate being vacuous
-for it.
+For one revision this adapter was strictly weaker than its Aave sibling. `getAssetsIn`
+reports markets *entered*, and enabling an asset as collateral counts even if nothing
+was borrowed, so a collateral-only account passed a health mandate that is vacuous
+for it. `aave-v3-health-v1` never had that hole: it reads `totalDebtBase` and refuses
+no-debt outright.
 
-Closing that gap needs a borrow balance, which Venus exposes only per market
-(`borrowBalanceStored` on each vToken). That means either an unbounded fan-out over
-the entered markets or a new required config field naming the market to monitor —
-a config-shape change, so it is recorded for decision rather than taken
-unilaterally. Flagged in `plan.md` §7.
+Closed by a third read — `borrowBalanceStored(address)` on a **named market**, now a
+required `borrowMarketAddress` config field. Naming one market was chosen over
+fanning out across every entered market: the fan-out is unbounded (52 markets exist
+on BSC today), its cost scales with someone else's position, and it would make the
+read count non-deterministic, which the pinned-block evidence shape depends on being
+fixed. Both adapters now refuse no-debt for the same reason, and the test that
+asserted the gap was **deliberately inverted** rather than deleted, so the closure is
+proven rather than assumed.
+
+**Measured, not assumed — and it caught a bug before it shipped.** Compound v2
+declares `borrowBalanceStored(address)` as returning a single `uint`. The live Venus
+vTokens on BSC return **three words**, balance in word 0 and two trailing zeros —
+verified against a real ~10,000 USDT borrow on vUSDT. So the adapter requires only
+that a word be present and reads word 0, exactly as the grid adapter tolerates a fork
+appending fields to `slot0()`. Requiring exactly one word, the natural reading of the
+declared ABI, would have made this adapter return `READ_RETURNDATA_MALFORMED` against
+every real Venus market.
 
 ### Every selector was computed, not recalled
 
@@ -113,6 +124,7 @@ unilaterally. Flagged in `plan.md` §7.
 0xbf92857c  getUserAccountData(address)
 0x5ec88c79  getAccountLiquidity(address)
 0xabfceffc  getAssetsIn(address)
+0x95dd9193  borrowBalanceStored(address)
 ```
 
 Verified with `viem.toFunctionSelector`. A wrong selector does not error — it
@@ -154,6 +166,7 @@ assigned on that basis alone:
 | `YIELD_SHARE_PRICE_UNDEFINED` | unknown | No shares outstanding, so the ratio is 0/0 |
 | `HEALTH_NO_DEBT_POSITION` | unknown | No debt, so no health factor to maintain |
 | `VENUS_NO_POSITION` | unknown | No Venus markets entered, so no position to maintain |
+| `VENUS_NO_DEBT_POSITION` | unknown | No borrow balance in the monitored market, so no health to maintain |
 | `VENUS_LIQUIDITY_COMPUTATION_FAILED` | unknown | Venus returned a nonzero in-band error code |
 | `VENUS_LIQUIDITY_INCONSISTENT` | unknown | Both liquidity and shortfall nonzero, which Venus forbids |
 | `GRID_TICK_UNINTERPRETABLE` | unknown | Tick outside the range a v3 pool can hold |
@@ -199,6 +212,7 @@ wrong number. Pin addresses from each protocol's own published deployment record
 // health (Venus)
 { adapterId: "venus-health-v1", protocol: "venus",
   comptrollerAddress: "0x…", accountAddress: "0x…",
+  borrowMarketAddress: "0x…",   // required — the vToken defining "has debt"
   minLiquidityUsdScaled: "…" }  // required, 1e18-scaled USD
 ```
 
@@ -324,9 +338,9 @@ identity that no longer describes it. Then redeploy signer and evaluator togethe
 - **Thresholds are global, not per-user.** See below. If per-user thresholds are
   wanted for September, that is a mandate-schema field and therefore a coordinated
   contract version.
-- **Venus cannot currently refuse a collateral-only account.** See the section
-  above. Closing it needs either a fan-out over entered markets or a new required
-  config field naming the market — a config-shape change.
+- ~~Venus cannot refuse a collateral-only account.~~ **Resolved 2026-08-18** by
+  Codex choosing the named-market option; `borrowMarketAddress` is now required and
+  the adapter issues three reads.
 
 ## Known limitation: thresholds are deployment policy, not user policy
 
@@ -348,7 +362,7 @@ change.
 corepack pnpm install
 corepack pnpm build
 corepack pnpm check   # tsc --noEmit
-corepack pnpm smoke   # 71 checks
+corepack pnpm smoke   # 97 checks
 ```
 
 `@mandatex/marketplace-core` is a **devDependency**, linked so the suite can

@@ -55,6 +55,7 @@ export const SELECTOR_TOTAL_SUPPLY = "0x18160ddd" as const; // totalSupply()
 export const SELECTOR_GET_USER_ACCOUNT_DATA = "0xbf92857c" as const; // getUserAccountData(address)
 export const SELECTOR_GET_ACCOUNT_LIQUIDITY = "0x5ec88c79" as const; // getAccountLiquidity(address)
 export const SELECTOR_GET_ASSETS_IN = "0xabfceffc" as const; // getAssetsIn(address)
+export const SELECTOR_BORROW_BALANCE_STORED = "0x95dd9193" as const; // borrowBalanceStored(address)
 
 /** Fixed scale for every ratio this package derives. */
 export const RATIO_SCALE = 10n ** 18n;
@@ -170,6 +171,22 @@ export const venusHealthAdapterConfigSchema = z
     comptrollerAddress: evmAddressSchema,
     accountAddress: evmAddressSchema,
     /**
+     * The vToken market whose borrow balance defines "has debt".
+     *
+     * Required, and the reason this adapter needs three reads rather than two.
+     * Venus exposes borrow balances only per market, so establishing that an
+     * account actually owes something means naming the market to ask. Without it
+     * the adapter can only see that markets were *entered*, which includes enabling
+     * an asset as collateral without ever borrowing — and a collateral-only account
+     * would pass a health mandate that is vacuous for it.
+     *
+     * Naming one market was chosen over fanning out across every entered market:
+     * the fan-out is unbounded (52 markets exist on BSC today), its cost scales with
+     * someone else's position, and it would make the read count non-deterministic,
+     * which the pinned-block evidence shape depends on being fixed.
+     */
+    borrowMarketAddress: evmAddressSchema,
+    /**
      * Minimum excess liquidity in 1e18-scaled USD. Required, with no default,
      * because a defensible default cannot exist for an absolute amount — see the
      * limitation above.
@@ -232,8 +249,9 @@ export const CATEGORY_ADAPTER_REGISTRY = Object.freeze([
     adapterId: VENUS_HEALTH_ADAPTER_ID,
     evidenceSchema: VENUS_HEALTH_EVIDENCE_SCHEMA,
     protocol: "venus" as const,
-    metric: "getAccountLiquidity() excess liquidity and shortfall versus a declared floor",
-    reads: 2,
+    metric:
+      "getAccountLiquidity() excess liquidity and shortfall plus monitored-market borrowBalanceStored() versus a declared floor",
+    reads: 3,
   }),
 ]);
 

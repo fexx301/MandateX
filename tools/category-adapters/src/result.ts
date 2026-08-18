@@ -47,6 +47,7 @@ export const adapterUnknownCodeSchema = z.enum([
   // liquidity/shortfall pair has an invariant that can be checked.
   "VENUS_LIQUIDITY_COMPUTATION_FAILED",
   "VENUS_NO_POSITION",
+  "VENUS_NO_DEBT_POSITION",
   "VENUS_LIQUIDITY_INCONSISTENT",
   // The pool answered, but not with a state a v3 pool can be in.
   "GRID_TICK_UNINTERPRETABLE",
@@ -70,6 +71,8 @@ const messages: Readonly<Record<AdapterFailCode | AdapterUnknownCode, string>> =
       "Venus returned a nonzero error code instead of a liquidity result, so the metric could not be established.",
     VENUS_NO_POSITION:
       "The account has entered no Venus markets, so there is no collateral position to maintain.",
+    VENUS_NO_DEBT_POSITION:
+      "The account has no borrow balance in the monitored Venus market, so there is no health to maintain.",
     VENUS_LIQUIDITY_INCONSISTENT:
       "Venus reported both excess liquidity and a shortfall, which the protocol's own invariant forbids.",
     READ_UNAVAILABLE:

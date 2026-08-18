@@ -555,6 +555,7 @@ async function main(): Promise<void> {
     protocol: "venus",
     comptrollerAddress: "0x5555555555555555555555555555555555555555",
     accountAddress: ACCOUNT,
+    borrowMarketAddress: "0x6666666666666666666666666666666666666666",
     minLiquidityUsdScaled: (1_000n * 10n ** 18n).toString(10),
   } as const;
 
@@ -570,9 +571,26 @@ async function main(): Promise<void> {
       ...Array.from({ length: count }, (_, index) => word(BigInt(index + 1))),
     );
 
+  /**
+   * `borrowBalanceStored()` return data in the shape the **live** vTokens actually
+   * use: three words with the balance in word 0. Compound declares a single `uint`,
+   * so building the default this way means every Venus test also exercises the
+   * tolerance that keeps the adapter working against real markets.
+   */
+  const borrowData = (balance: bigint): string =>
+    returndata(word(balance), word(0n), word(0n));
+
+  const DEFAULT_BORROW = 4_200n * 10n ** 18n;
+
+  /** stubReader with a nonzero borrow balance unless a case overrides it. */
+  const venusReader = (
+    responses: Readonly<Record<string, string | undefined>>,
+  ): ReturnType<typeof stubReader> =>
+    stubReader({ borrowBalanceStored: borrowData(DEFAULT_BORROW), ...responses });
+
   const venusLive = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 0n, 0n),
       getAssetsIn: LIVE_VENUS_ASSETS_IN,
     }),
@@ -585,7 +603,7 @@ async function main(): Promise<void> {
 
   const venusHealthy = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 5_000n * 10n ** 18n, 0n),
       getAssetsIn: assetsInData(2),
     }),
@@ -610,20 +628,101 @@ async function main(): Promise<void> {
   // point of asserting it.
   const venusCollateralOnly = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
       getAssetsIn: assetsInData(1),
+      // Entered a market as collateral, borrowed nothing. Ample liquidity, no
+      // shortfall — the exact shape that passed on two reads.
+      borrowBalanceStored: borrowData(0n),
     }),
   );
   check(
-    "KNOWN GAP: a collateral-only account passes, because markets-entered is not debt",
-    venusCollateralOnly.status === "pass",
+    "GAP CLOSED: a collateral-only account no longer passes — markets entered is not debt",
+    venusCollateralOnly.status === "unknown" &&
+      venusCollateralOnly.code === "VENUS_NO_DEBT_POSITION",
     venusCollateralOnly.status,
+  );
+  check(
+    "the Aave and Venus adapters now refuse no-debt for the same reason",
+    venusCollateralOnly.status === "unknown" && sentinel.status === "unknown",
+  );
+
+  // The live return shape. Compound declares one word; the real vTokens return
+  // three. Both must work, and a real balance must be read from word 0.
+  const venusLiveBorrowShape = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    venusReader({
+      getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(2),
+      borrowBalanceStored: returndata(word(10_000_024_862_639_051_791_976n), word(0n), word(0n)),
+    }),
+  );
+  check(
+    "a three-word borrow response, as the live vTokens return, reads the balance from word 0",
+    venusLiveBorrowShape.status === "pass" &&
+      venusLiveBorrowShape.evidence.metric.borrowBalanceStored ===
+        "10000024862639051791976",
+    venusLiveBorrowShape.status,
+  );
+
+  const venusSingleWordBorrow = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    venusReader({
+      getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(2),
+      borrowBalanceStored: returndata(word(500n)),
+    }),
+  );
+  check(
+    "a one-word borrow response, as Compound declares, also works",
+    venusSingleWordBorrow.status === "pass",
+    venusSingleWordBorrow.status,
+  );
+
+  const venusBorrowDown = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    venusReader({
+      getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(2),
+      borrowBalanceStored: undefined,
+    }),
+  );
+  check(
+    "an unreachable borrow market is unknown, not an assumed zero debt",
+    venusBorrowDown.status === "unknown" && venusBorrowDown.code === "READ_UNAVAILABLE",
+    venusBorrowDown.status,
+  );
+
+  const venusBorrowMalformed = await evaluateVenusHealth(
+    VENUS_CONFIG,
+    venusReader({
+      getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+      getAssetsIn: assetsInData(2),
+      borrowBalanceStored: "0x",
+    }),
+  );
+  check(
+    "empty borrow return data is malformed, not zero debt",
+    venusBorrowMalformed.status === "unknown" &&
+      venusBorrowMalformed.code === "READ_RETURNDATA_MALFORMED",
+    venusBorrowMalformed.status,
+  );
+
+  const venusReadCount = venusReader({
+    getAccountLiquidity: liquidityData(0n, 9_000n * 10n ** 18n, 0n),
+    getAssetsIn: assetsInData(2),
+  });
+  await evaluateVenusHealth(VENUS_CONFIG, venusReadCount);
+  check(
+    "the Venus adapter issues exactly three reads, and the count is deterministic",
+    venusReadCount.calls.length === 3 &&
+      new Set(venusReadCount.calls).size === 3,
+    venusReadCount.calls.join(","),
   );
 
   const venusThin = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 999n * 10n ** 18n, 0n),
       getAssetsIn: assetsInData(1),
     }),
@@ -636,7 +735,7 @@ async function main(): Promise<void> {
 
   const venusShortfall = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 0n, 250n * 10n ** 18n),
       getAssetsIn: assetsInData(3),
     }),
@@ -651,7 +750,7 @@ async function main(): Promise<void> {
   // liquidatable, even if the liquidity call somehow reports a shortfall.
   const venusEmptyWithShortfall = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 0n, 250n * 10n ** 18n),
       getAssetsIn: assetsInData(0),
     }),
@@ -665,7 +764,7 @@ async function main(): Promise<void> {
 
   const venusError = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(9n, 0n, 0n),
       getAssetsIn: assetsInData(2),
     }),
@@ -678,7 +777,7 @@ async function main(): Promise<void> {
 
   const venusInconsistent = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: liquidityData(0n, 10n ** 18n, 10n ** 18n),
       getAssetsIn: assetsInData(2),
     }),
@@ -692,7 +791,7 @@ async function main(): Promise<void> {
 
   const venusShort = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({
+    venusReader({
       getAccountLiquidity: returndata(word(0n), word(0n)),
       getAssetsIn: assetsInData(1),
     }),
@@ -705,7 +804,7 @@ async function main(): Promise<void> {
 
   const venusDown = await evaluateVenusHealth(
     VENUS_CONFIG,
-    stubReader({ getAccountLiquidity: undefined, getAssetsIn: assetsInData(1) }),
+    venusReader({ getAccountLiquidity: undefined, getAssetsIn: assetsInData(1) }),
   );
   check(
     "an unreachable comptroller is unknown",

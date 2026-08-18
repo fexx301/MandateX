@@ -157,6 +157,7 @@ export const venusHealthEvidenceSchema = z
       .object({
         comptrollerAddress: evmAddressSchema,
         accountAddress: evmAddressSchema,
+        borrowMarketAddress: evmAddressSchema,
       })
       .strict(),
     policy: z.object({ minLiquidityUsdScaled: uint256DecimalSchema }).strict(),
@@ -168,6 +169,12 @@ export const venusHealthEvidenceSchema = z
         shortfallUsdScaled: uint256DecimalSchema,
         /** Count of Venus markets the account has entered. */
         marketsEntered: z.number().int().nonnegative().max(1_000),
+        /**
+         * Borrow balance in the named market, in that market's underlying atomic
+         * units. This is the field that makes "has debt" checkable, and therefore
+         * the field that closes the gap between this adapter and the Aave one.
+         */
+        borrowBalanceStored: uint256DecimalSchema,
       })
       .strict(),
   })
