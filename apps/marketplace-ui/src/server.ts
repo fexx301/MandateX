@@ -199,7 +199,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
         response,
         200,
         page({
-          title: "MandateX — mandate",
+          title: "Mandate | MandateX",
           body: renderMandateForm({
             mandate: fixtures?.mandate ?? null,
             attestationCount: fixtures?.comparisonSet.length ?? 0,
@@ -222,7 +222,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
           response,
           503,
           page({
-            title: "MandateX — unavailable",
+            title: "Unavailable | MandateX",
             body: renderError({
               heading: "No candidate attestations are available",
               detail:
@@ -251,7 +251,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
           response,
           evaluated.status === 0 ? 502 : evaluated.status,
           page({
-            title: "MandateX — not evaluated",
+            title: "Not evaluated | MandateX",
             body: renderError({
               heading: "The marketplace API did not evaluate this mandate",
               detail: evaluated.detail,
@@ -266,7 +266,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
         response,
         200,
         page({
-          title: "MandateX — comparison",
+          title: "Comparison | MandateX",
           body: renderComparison({
             view: evaluated.value,
             mandate: built.mandate,
@@ -289,7 +289,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
       response,
       404,
       page({
-        title: "MandateX — not found",
+        title: "Not found | MandateX",
         body: renderError({
           heading: "No such page",
           detail: `${method} ${path} is not a route this interface serves.`,
@@ -309,7 +309,7 @@ export function createUiServer(config: UiConfig, client?: MarketplaceApiClient):
           response,
           500,
           page({
-            title: "MandateX — error",
+            title: "Error | MandateX",
             body: renderError({
               heading: "The interface failed to render this page",
               detail: "No detail is reported here, deliberately, because it is not attributable to the request.",

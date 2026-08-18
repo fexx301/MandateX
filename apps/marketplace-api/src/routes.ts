@@ -417,6 +417,19 @@ export function createRouter(config: AppConfig, evaluator: MarketplaceEvaluator)
         | { mandateId?: string; category?: string; evaluatedAt?: number }
         | undefined;
 
+      // Core only issues a receipt when it actually evaluated something, so when
+      // every attestation is rejected at verification there is no receipt and no
+      // attested mandate identity. Falling back to `""` there loses the mandate id
+      // exactly when the reader most needs it: a page reporting that nothing
+      // qualified is not much use if it cannot say what was asked for. The
+      // submitted mandate is the honest fallback, and it is clearly a different
+      // thing from an attested value, so it is only read when the receipt is absent.
+      const requested = parsed.mandate as
+        | { mandateId?: unknown; category?: unknown }
+        | null;
+      const requestedText = (value: unknown): string =>
+        typeof value === "string" ? value : "";
+
       json(
         response,
         200,
@@ -424,8 +437,8 @@ export function createRouter(config: AppConfig, evaluator: MarketplaceEvaluator)
           result: outcome.result,
           submitted: parsed.attestations.length,
           unverified: outcome.rejected,
-          mandateId: receipt?.mandateId ?? "",
-          category: receipt?.category ?? "",
+          mandateId: receipt?.mandateId ?? requestedText(requested?.mandateId),
+          category: receipt?.category ?? requestedText(requested?.category),
           evaluatedAt: receipt?.evaluatedAt ?? Math.floor(Date.now() / 1000),
         }),
       );

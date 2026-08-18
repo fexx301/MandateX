@@ -100,6 +100,6 @@ export function bps(value: unknown): string {
 /** Unix seconds as an ISO instant, labelled UTC so it is unambiguous. */
 export function instant(value: unknown): string {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return "—";
+  if (!Number.isFinite(numeric) || numeric <= 0) return "-";
   return `${new Date(numeric * 1000).toISOString().replace(".000Z", "Z")}`;
 }

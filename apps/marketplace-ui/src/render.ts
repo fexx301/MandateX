@@ -88,7 +88,7 @@ export function renderMandateForm(input: {
         </div>`
       : html`<div class="banner bad">
           <strong>No candidate attestations are available.</strong>
-          This UI does not mint attestations — it submits ones issued by the verifier.
+          This UI does not mint attestations. It submits ones issued by the verifier.
           The marketplace API at <span class="mono">${input.apiBase}</span> is not serving
           development fixtures, which is correct in production, so there is nothing to
           compare until a verifier supplies real attestations.
@@ -98,7 +98,7 @@ export function renderMandateForm(input: {
       <div class="panel">
         <h3>Mandate</h3>
         <div class="grid">
-          <div>
+          <div class="span-2">
             <label for="category">Category</label>
             <select id="category" name="category">
               ${CATEGORY_OPTIONS.map(
@@ -125,7 +125,7 @@ export function renderMandateForm(input: {
         <p class="soft" style="font-size:13px">
           Each attestation commits to the hash of the exact mandate it was issued for. Change
           any field above and every candidate will fail verification with
-          <code>ATTESTATION_MANDATE_HASH_MISMATCH</code> — not because the agent did anything
+          <code>ATTESTATION_MANDATE_HASH_MISMATCH</code>. Not because the agent did anything
           wrong, but because the evidence it signed no longer describes what is being asked.
         </p>
         <p class="soft" style="font-size:13px">
@@ -141,14 +141,14 @@ export function renderMandateForm(input: {
         <p class="soft" style="font-size:13px">
           Only <strong>rebalancing</strong> is evaluable today. Marketplace Core reports
           grid, yield and lending health as unsupported, so they are listed above but
-          cannot be selected — offering them would return a category mismatch against the
+          cannot be selected. Offering them would return a category mismatch against the
           rebalancing quotes that do exist, which reads like a different fault.
         </p>
         <p class="soft" style="font-size:13px">
           Telemetry adapters for those three categories exist as evidence producers but are
           not registered in Core. When they are, their metric thresholds will be
           <strong>deployment policy set by the verifier operator, identical for every
-          mandate in a category</strong> — not a per-mandate value. The mandate schema has no
+          mandate in a category</strong>, not a per-mandate value. The mandate schema has no
           field for a user-supplied metric threshold, so this form deliberately does not
           offer one.
         </p>
@@ -211,13 +211,12 @@ export function renderComparison(input: {
 
   return html`
     <h1>Comparison</h1>
-    <p class="sub">
-      Mandate <span class="mono">${view.mandateId.length > 0 ? view.mandateId : "—"}</span>
-      &middot; category
-      <span class="mono">${view.category.length > 0 ? view.category : "—"}</span> &middot;
-      evaluated ${instant(view.evaluatedAt)} &middot; effect
-      <span class="tag flat">${view.effect}</span>
-    </p>
+    <dl class="meta">
+      <div><dt>Mandate</dt><dd class="mono">${view.mandateId.length > 0 ? view.mandateId : "-"}</dd></div>
+      <div><dt>Category</dt><dd class="mono">${view.category.length > 0 ? view.category : "-"}</dd></div>
+      <div><dt>Evaluated</dt><dd class="mono">${instant(view.evaluatedAt)}</dd></div>
+      <div><dt>Effect</dt><dd><span class="tag flat">${view.effect}</span></dd></div>
+    </dl>
 
     ${renderMandateBindingNotice(view)}
 
@@ -239,7 +238,7 @@ export function renderComparison(input: {
     <div id="basis"></div>
     ${renderRankingBasis(view)}
 
-    <h2 id="ranked">Ranked candidates${raw(eligible.length === 0 ? " — none qualified" : "")}</h2>
+    <h2 id="ranked">Ranked candidates${raw(eligible.length === 0 ? ": none qualified" : "")}</h2>
     ${eligible.length === 0
       ? html`<div class="panel soft" style="font-size:13.5px">
           No candidate is eligible under this mandate. Every submitted candidate is listed
@@ -281,7 +280,7 @@ function renderMandateBindingNotice(view: ComparisonView): Html {
     <strong>The mandate was edited, so no attestation applies to it.</strong>
     Every candidate failed with <code>ATTESTATION_MANDATE_HASH_MISMATCH</code>: each attestation
     commits to the hash of the exact mandate it was issued for, and this one no longer matches.
-    Nothing is wrong with the candidates — the mandate they answered is not the mandate that was
+    Nothing is wrong with the candidates. The mandate they answered is not the mandate that was
     submitted. Revert the fields, or have the verifier re-issue attestations against the new
     mandate.
   </div>`;
@@ -298,17 +297,18 @@ function renderSummary(view: ComparisonView): Html {
     ["Inconclusive", s.inconclusive, s.inconclusive > 0 ? "warn" : "flat"],
     ["Unsupported", s.unsupported, "flat"],
   ];
+  // A count of zero is dimmed rather than coloured. Seven identically-weighted
+  // numbers make the reader hunt for the ones that matter; dimming the empty
+  // ones means the populated buckets are what the eye lands on.
   return html`<div class="panel">
-    <div class="grid">
+    <dl class="stats">
       ${cells.map(
         ([label, value, tone]) => html`<div>
-          <div class="faint" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">
-            ${label}
-          </div>
-          <div class="rank"><span class="tag ${tone}" style="font-size:14px">${value}</span></div>
+          <dt>${label}</dt>
+          <dd class="${value === 0 ? "zero" : tone}">${String(value)}</dd>
         </div>`,
       )}
-    </div>
+    </dl>
   </div>`;
 }
 
@@ -452,7 +452,7 @@ function renderFactors(factors: readonly DisplayFactor[]): Html {
  * same visual weight, and the reader concludes six factors competed when four did.
  */
 function renderConfirmations(confirmations: readonly DisplayConfirmation[]): Html {
-  return html`<h3>Eligibility confirmations — no effect on ordering</h3>
+  return html`<h3>Eligibility confirmations (no effect on ordering)</h3>
     <div class="scroll">
       <table>
         <thead>
@@ -495,7 +495,7 @@ function renderFindings(candidate: DisplayCandidate): Html {
         </p>`
       : html`<p class="soft" style="font-size:13px;margin-top:10px">
           This candidate is <strong>${candidate.outcome}</strong> but reported no findings,
-          which should not happen — treat the verdict as unexplained rather than benign.
+          which should not happen. Treat the verdict as unexplained rather than benign.
         </p>`;
   }
   return html`<h3>
@@ -590,9 +590,9 @@ function renderPermissionReview(view: ComparisonView, mandate: unknown): Html {
       <dl class="kv grid">
         <div><dt>Max spend</dt><dd>${usdMicros(ceilingSpend)}</dd></div>
         <div><dt>Permissions expire</dt><dd>${instant(ceilingExpiry)}</dd></div>
-        <div><dt>Allowed protocols</dt><dd>${allowedProtocols.join(", ") || "—"}</dd></div>
-        <div><dt>Allowed contracts</dt><dd>${allowedContracts.join(", ") || "—"}</dd></div>
-        <div><dt>Allowed calls</dt><dd>${allowedCalls.join(", ") || "—"}</dd></div>
+        <div><dt>Allowed protocols</dt><dd>${allowedProtocols.join(", ") || "-"}</dd></div>
+        <div><dt>Allowed contracts</dt><dd>${allowedContracts.join(", ") || "-"}</dd></div>
+        <div><dt>Allowed calls</dt><dd>${allowedCalls.join(", ") || "-"}</dd></div>
       </dl>
     </div>
 
@@ -635,7 +635,7 @@ function renderPermissionReview(view: ComparisonView, mandate: unknown): Html {
             <tr>
               <td>Contracts it may call</td>
               <td class="num mono">
-                ${contracts.length === 0 ? "—" : contracts.join(", ")}
+                ${contracts.length === 0 ? "-" : contracts.join(", ")}
                 ${strayContracts.length === 0
                   ? null
                   : html`<span class="tag bad">not in mandate</span>`}
@@ -644,7 +644,7 @@ function renderPermissionReview(view: ComparisonView, mandate: unknown): Html {
             <tr>
               <td>Calls it may make</td>
               <td class="num mono">
-                ${calls.length === 0 ? "—" : calls.join(", ")}
+                ${calls.length === 0 ? "-" : calls.join(", ")}
                 ${strayCalls.length === 0 ? null : html`<span class="tag bad">not in mandate</span>`}
               </td>
             </tr>
@@ -725,16 +725,16 @@ function renderReceipt(view: ComparisonView): Html {
   return html`<h2 id="receipt">Receipt</h2>
     <div class="panel">
       <dl class="kv grid">
-        <div><dt>Schema</dt><dd>${String(at(receipt, "schema") ?? "—")}</dd></div>
-        <div><dt>Effect</dt><dd>${String(at(receipt, "effect") ?? "—")}</dd></div>
+        <div><dt>Schema</dt><dd>${String(at(receipt, "schema") ?? "-")}</dd></div>
+        <div><dt>Effect</dt><dd>${String(at(receipt, "effect") ?? "-")}</dd></div>
         <div><dt>Evaluated at</dt><dd>${instant(at(receipt, "evaluatedAt"))}</dd></div>
-        <div><dt>Mandate</dt><dd>${String(at(receipt, "mandateId") ?? "—")}</dd></div>
-        <div><dt>Category</dt><dd>${String(at(receipt, "category") ?? "—")}</dd></div>
+        <div><dt>Mandate</dt><dd>${String(at(receipt, "mandateId") ?? "-")}</dd></div>
+        <div><dt>Category</dt><dd>${String(at(receipt, "category") ?? "-")}</dd></div>
         <div>
           <dt>Adapter</dt>
           <dd>
             ${adapterStatus === "supported"
-              ? String(adapterName ?? "—")
+              ? String(adapterName ?? "-")
               : html`<span class="tag flat">${String(adapterStatus ?? "unknown")}</span>
                   ${String(adapterCode ?? "")}`}
           </dd>
@@ -762,7 +762,7 @@ export function renderError(input: {
     <div class="panel soft" style="font-size:13px">
       The marketplace API this interface reads is
       <span class="mono">${input.apiBase}</span>. Nothing was evaluated, and no state
-      changed — this interface only ever reads.
+      changed. This interface only ever reads.
     </div>
     <div class="row"><a href="/">← back to the mandate</a></div>
   `;
