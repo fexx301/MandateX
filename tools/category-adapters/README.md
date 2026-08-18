@@ -356,7 +356,44 @@ imply otherwise. Making thresholds user-supplied requires a new mandate-schema
 field, which is a coordinated contract version rather than a unilateral September
 change.
 
-## Running
+## Operator scripts
+
+Two read-only tools for choosing the configuration the adapters require. Neither
+signs, sends, funds, nor broadcasts anything, and neither can reach a wallet path.
+
+```bash
+corepack pnpm discover:venus                      # find a live Venus borrower
+corepack pnpm discover:venus -- --market vUSDC --blocks 8000 --floor 500
+corepack pnpm verify:vault 0xVault                # is this a usable ERC-4626 vault?
+corepack pnpm verify:vault -- --discover --address 0xVault
+```
+
+**`discover-venus-borrower.mjs`** exists because the health adapter needs an account
+that actually owes something — an account with no debt is a different case, not a
+weaker one, and correctly returns `VENUS_NO_DEBT_POSITION`. It reads recent `Borrow`
+events, runs the **real** adapter against each candidate at a pinned block, and
+prints a paste-ready configuration for one that produces `pass` evidence.
+
+It hardcodes no borrower, deliberately: a pinned address is a demo that breaks
+silently the day that account repays. **You do not need to own the account** — every
+call is a read, so monitoring requires no key. If you want a position you control,
+fork BSC with Anvil instead; that is the only transaction path this project permits.
+
+Whatever it returns, label it honestly: a live read-only observation of a public
+third-party position proves the adapter produces real mainnet evidence, and implies
+no mandate relationship with that account's owner.
+
+**`verify-erc4626.mjs`** exists because the yield adapter ships no default vault. A
+valid-looking wrong address is worse than a missing one — it reads a contract that
+answers and returns a confidently wrong number. So it checks, in order: code exists;
+`totalAssets()` returns exactly one word; `totalSupply()` returns exactly one word;
+`totalSupply()` is non-zero, so share price is defined rather than 0/0; and finally
+runs the real adapter, so the verdict is the adapter's rather than the script's.
+
+`--discover` without `--address` needs an endpoint that permits unfiltered
+`eth_getLogs`. Public BSC endpoints refuse it regardless of block range, and the
+script says so precisely rather than blaming the range.
+
 
 ```bash
 corepack pnpm install
