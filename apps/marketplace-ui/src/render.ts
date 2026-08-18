@@ -7,7 +7,7 @@ import type {
 } from "./api.js";
 import { bps, html, instant, raw, usdMicros, type Html } from "./html.js";
 import {
-  CATEGORY_OPTIONS,
+  type CategoryOption,
   MANDATE_FIELDS,
   fieldValue,
   type MandateField,
@@ -58,6 +58,8 @@ export function renderMandateForm(input: {
   readonly fixtureWarning?: string;
   readonly problems?: readonly string[];
   readonly notice?: string;
+  /** Core's category policy, derived via GET /v1/categories. */
+  readonly categoryOptions: readonly CategoryOption[];
 }): Html {
   return html`
     <h1>Hire an agent under a mandate</h1>
@@ -101,7 +103,7 @@ export function renderMandateForm(input: {
           <div class="span-2">
             <label for="category">Category</label>
             <select id="category" name="category">
-              ${CATEGORY_OPTIONS.map(
+              ${input.categoryOptions.map(
                 (option) => html`<option
                   value="${option.value}"
                   ${raw(option.supported ? "" : "disabled")}

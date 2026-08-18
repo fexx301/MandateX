@@ -2,7 +2,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import { MarketplaceApiClient, type FixtureBundle } from "./api.js";
 import { render } from "./html.js";
-import { buildMandate, parseFormBody } from "./mandate.js";
+import {
+  buildMandate,
+  categoryOptionsFrom,
+  parseFormBody,
+  type CategoryOption,
+} from "./mandate.js";
 import { page } from "./page.js";
 import { renderComparison, renderError, renderMandateForm } from "./render.js";
 
@@ -146,10 +151,19 @@ function sendHtml(response: ServerResponse, status: number, body: string): void 
     // The pages embed no external resources and run no inline script, so the
     // policy can be strict enough to make a successful injection inert even if
     // an escaping bug slipped through.
+    //
+    // `frame-ancestors` is listed explicitly because it does NOT inherit from
+    // `default-src` — a policy of `default-src 'none'` leaves framing wide open.
+    // These headers live here rather than in a reverse proxy so they hold however
+    // this is served: behind nginx, behind Caddy, or straight off the port. A
+    // header set only at the edge is a header that disappears the day the edge
+    // changes.
     "content-security-policy":
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
+    // Redundant with frame-ancestors for modern browsers, kept for older ones.
+    "x-frame-options": "DENY",
   });
   response.end(body);
 }
@@ -168,6 +182,23 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
   async function loadFixtures(): Promise<FixtureBundle | null> {
     const result = await client.fixtures();
     return result.ok ? result.value : null;
+  }
+
+  /**
+   * Core's category policy, fetched per request rather than cached.
+   *
+   * Not cached on purpose. The whole point of reading this from Core is that the
+   * interface tracks Core, and a cache would reintroduce exactly the staleness
+   * the hardcoded table had — the category would flip in Core and the form would
+   * keep showing the old answer until a restart. It is one local call against an
+   * API this handler already talks to.
+   *
+   * On failure it returns undefined, and `categoryOptionsFrom` falls back to the
+   * conservative list that offers only rebalancing.
+   */
+  async function loadCategoryOptions(): Promise<readonly CategoryOption[]> {
+    const result = await client.categories();
+    return categoryOptionsFrom(result.ok ? result.value : undefined);
   }
 
   return async function route(request, response): Promise<void> {
@@ -201,6 +232,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
         page({
           title: "Mandate | MandateX",
           body: renderMandateForm({
+            categoryOptions: await loadCategoryOptions(),
             mandate: fixtures?.mandate ?? null,
             attestationCount: fixtures?.comparisonSet.length ?? 0,
             apiBase: config.apiUrl,
@@ -237,7 +269,7 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
       }
 
       const form = parseFormBody(body.body);
-      const built = buildMandate(fixtures.mandate, form);
+      const built = buildMandate(fixtures.mandate, form, await loadCategoryOptions());
       const evaluated = await client.evaluate({
         mandate: built.mandate,
         attestations: fixtures.comparisonSet,

@@ -8,7 +8,7 @@ import { MarketplaceEvaluator } from "@mandatex/marketplace-api/dist/core.js";
 import { createRouter } from "@mandatex/marketplace-api/dist/routes.js";
 
 import { escapeHtml, html, raw, render } from "./html.js";
-import { buildMandate, parseFormBody } from "./mandate.js";
+import { buildMandate, categoryOptionsFrom, parseFormBody } from "./mandate.js";
 import { renderComparison } from "./render.js";
 import { UiConfigError, createUiServer, loadUiConfig } from "./server.js";
 
@@ -297,13 +297,55 @@ async function main(): Promise<void> {
     JSON.stringify(badInput.problems),
   );
 
-  const unsupportedCategory = buildMandate({ category: "rebalancing" }, { category: "grid" });
+  // Category support is derived from Core, so this asserts AGREEMENT rather than a
+  // hardcoded answer. The distinction is the point: when Core flips a category to
+  // supported, these checks stay green with no edit, because they never encoded
+  // which categories are supported — only that the interface reports what Core
+  // reports. The previous version asserted "grid is unsupported" and would have
+  // gone red on the flip, which is a test failing for the wrong reason.
+  const fallbackRefusal = buildMandate({ category: "rebalancing" }, { category: "grid" });
   check(
-    "selecting an unsupported category is refused and explained, not silently applied",
-    unsupportedCategory.problems.length === 1 &&
-      (unsupportedCategory.mandate as { category: string }).category === "rebalancing" &&
-      /CATEGORY_GRID_UNSUPPORTED/.test(unsupportedCategory.problems[0] ?? ""),
-    JSON.stringify(unsupportedCategory.problems),
+    "with no policy supplied, buildMandate falls back to refusing rather than allowing",
+    fallbackRefusal.problems.length === 1 &&
+      (fallbackRefusal.mandate as { category: string }).category === "rebalancing",
+    JSON.stringify(fallbackRefusal.problems),
+  );
+
+  const derivedOptions = categoryOptionsFrom({
+    categories: {
+      rebalancing: { evaluationSupport: "supported", adapters: ["pancakeswap-v3-rebalancing-v1"] },
+      grid: { evaluationSupport: "unsupported", unsupportedCode: "CATEGORY_GRID_UNSUPPORTED" },
+    },
+  });
+  check(
+    "a supported category is selectable and names its adapter",
+    derivedOptions[0]?.supported === true &&
+      /pancakeswap-v3-rebalancing-v1/.test(derivedOptions[0]?.label ?? ""),
+    JSON.stringify(derivedOptions[0]),
+  );
+  check(
+    "an unsupported category is not selectable and carries Core's own code",
+    derivedOptions[1]?.supported === false &&
+      derivedOptions[1]?.reason === "CATEGORY_GRID_UNSUPPORTED" &&
+      /registration pending/.test(derivedOptions[1]?.label ?? ""),
+    JSON.stringify(derivedOptions[1]),
+  );
+  check(
+    "refusal quotes the code Core supplied, so the reason is Core's and not invented here",
+    /CATEGORY_GRID_UNSUPPORTED/.test(
+      buildMandate({ category: "rebalancing" }, { category: "grid" }, derivedOptions)
+        .problems[0] ?? "",
+    ),
+  );
+  // The flip, simulated: the same category reported supported must become
+  // selectable and must stop claiming registration is pending.
+  const flipped = categoryOptionsFrom({
+    categories: { grid: { evaluationSupport: "supported", adapters: ["pancakeswap-v3-grid-v1"] } },
+  });
+  check(
+    "if Core reports a category supported, the interface offers it with no code change",
+    flipped[0]?.supported === true && !/registration pending/.test(flipped[0]?.label ?? ""),
+    JSON.stringify(flipped[0]),
   );
 
   const rawOverride = buildMandate({ a: 1 }, { rawMandate: '{"b":2}' });

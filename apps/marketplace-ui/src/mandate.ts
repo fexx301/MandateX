@@ -105,27 +105,87 @@ export interface CategoryOption {
   readonly reason?: string;
 }
 
-export const CATEGORY_OPTIONS: readonly CategoryOption[] = Object.freeze([
-  { value: "rebalancing", label: "Rebalancing (PancakeSwap v3 position)", supported: true },
-  {
-    value: "grid",
-    label: "Grid (adapter built, registration pending)",
-    supported: false,
-    reason: "CATEGORY_GRID_UNSUPPORTED",
-  },
-  {
-    value: "yield",
-    label: "Yield (adapter built, registration pending)",
-    supported: false,
-    reason: "CATEGORY_YIELD_UNSUPPORTED",
-  },
-  {
-    value: "health",
-    label: "Lending health (adapter built, registration pending)",
-    supported: false,
-    reason: "CATEGORY_HEALTH_UNSUPPORTED",
-  },
+/**
+ * The shape of one category entry in Core's policy, as the API reports it.
+ *
+ * Declared here rather than imported from `api.ts` so this module keeps no
+ * dependencies — it is pure form-to-mandate logic and is unit-testable without a
+ * client. TypeScript is structural, so it interoperates with the API's own
+ * `CategoryPolicyResponse` without the two being coupled.
+ */
+export interface CategoryPolicyEntry {
+  readonly evaluationSupport: "supported" | "unsupported";
+  readonly unsupportedCode?: string;
+  readonly adapters?: readonly string[];
+}
+
+export interface CategoryPolicyResponse {
+  readonly categories: Readonly<Record<string, CategoryPolicyEntry>>;
+}
+
+/**
+ * Human-readable names. These are presentation and belong here, because Core has
+ * no opinion about display text — it reports support state and codes.
+ *
+ * What is deliberately NOT here is which categories are evaluable. That comes
+ * from Core via GET /v1/categories. See `categoryOptionsFrom`.
+ */
+const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  rebalancing: "Rebalancing",
+  grid: "Grid",
+  yield: "Yield",
+  health: "Lending health",
+});
+
+/**
+ * Conservative fallback, used only when the API cannot be reached.
+ *
+ * It errs toward refusing: every category except rebalancing is treated as
+ * unsupported. That direction is deliberate — offering a category Core would
+ * refuse produces a confusing category-mismatch error against quotes that do
+ * exist, while refusing one Core would accept is merely a missing feature. When
+ * the truth is unavailable, the safe guess is the narrower one.
+ */
+const FALLBACK_CATEGORY_OPTIONS: readonly CategoryOption[] = Object.freeze([
+  { value: "rebalancing", label: "Rebalancing", supported: true },
+  { value: "grid", label: "Grid (support unknown, API unreachable)", supported: false },
+  { value: "yield", label: "Yield (support unknown, API unreachable)", supported: false },
+  { value: "health", label: "Lending health (support unknown, API unreachable)", supported: false },
 ]);
+
+/**
+ * Derives the selectable category list from Core's policy.
+ *
+ * The label suffix is derived too, not hardcoded per category: a supported
+ * category names its adapter, an unsupported one says registration is pending.
+ * That means when Core flips a category to supported, the option becomes
+ * selectable AND its label stops saying "pending" — with no edit here. The
+ * previous hardcoded table required someone to remember both.
+ */
+export function categoryOptionsFrom(
+  policy: CategoryPolicyResponse | undefined,
+): readonly CategoryOption[] {
+  if (policy === undefined) return FALLBACK_CATEGORY_OPTIONS;
+  const entries: readonly [string, CategoryPolicyEntry][] = Object.entries(policy.categories);
+  if (entries.length === 0) return FALLBACK_CATEGORY_OPTIONS;
+  return Object.freeze(
+    entries.map(([value, entry]) => {
+      const name = CATEGORY_DISPLAY_NAMES[value] ?? value;
+      const supported = entry.evaluationSupport === "supported";
+      const adapters = entry.adapters ?? [];
+      return Object.freeze({
+        value,
+        label: supported
+          ? adapters.length > 0
+            ? `${name} (${adapters.join(", ")})`
+            : name
+          : `${name} (adapter built, registration pending)`,
+        supported,
+        ...(entry.unsupportedCode === undefined ? {} : { reason: entry.unsupportedCode }),
+      });
+    }),
+  );
+}
 
 /** Parses an `application/x-www-form-urlencoded` body into a flat map. */
 export function parseFormBody(body: string): Record<string, string> {
@@ -184,7 +244,17 @@ export function fieldValue(mandate: unknown, field: MandateField): string {
  * silently became `0` or `NaN` would change every eligibility verdict on the page
  * while looking like the number the user typed.
  */
-export function buildMandate(base: unknown, form: Record<string, string>): MandateBuildResult {
+/**
+ * `options` carries Core's category policy, so validation refuses exactly what
+ * Core refuses. It defaults to the conservative fallback rather than to an
+ * everything-allowed list: a caller that forgets to pass the real policy gets the
+ * narrower behaviour, not the permissive one.
+ */
+export function buildMandate(
+  base: unknown,
+  form: Record<string, string>,
+  options: readonly CategoryOption[] = FALLBACK_CATEGORY_OPTIONS,
+): MandateBuildResult {
   const raw = (form.rawMandate ?? "").trim();
   if (raw.length > 0) {
     try {
@@ -203,12 +273,13 @@ export function buildMandate(base: unknown, form: Record<string, string>): Manda
 
   const category = form.category;
   if (category !== undefined && category.length > 0) {
-    const option = CATEGORY_OPTIONS.find((entry) => entry.value === category);
+    const option = options.find((entry) => entry.value === category);
     if (option === undefined) {
       problems.push(`unknown category "${category}"`);
     } else if (!option.supported) {
       problems.push(
-        `category "${category}" is reported unsupported by Marketplace Core (${option.reason}), ` +
+        `category "${category}" is reported unsupported by Marketplace Core` +
+          `${option.reason === undefined ? "" : ` (${option.reason})`}, ` +
           "so it cannot be evaluated; the mandate category was left unchanged",
       );
     } else {

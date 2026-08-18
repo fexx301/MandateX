@@ -1,0 +1,137 @@
+# MandateX on a single host: three services, one private network, TLS at the edge.
+#
+#   docker compose -f deploy/compose.yaml up -d --build
+#
+# Built for Oracle Cloud Always Free, but nothing here is Oracle-specific: it is
+# plain compose and works on any VM. Run it from the REPOSITORY ROOT, because the
+# Dockerfiles reference package paths relative to the root (the packages link to
+# each other, so the build context has to reproduce the repository layout).
+#
+# ── Why this shape ───────────────────────────────────────────────────────────
+#
+# The verifier holds the signing key and is NEVER published. It has no `ports:`
+# stanza, so it is reachable only from the private compose network. The app pins
+# the verifier's public key and talks to it over that network.
+#
+# There is deliberately NO TLS terminator in this file. This stack is built to sit
+# behind a web server that already owns 80/443 and already holds certificates, so
+# the only thing bound to the host is the UI, on loopback. Shipping a second web
+# server would mean the safe arrangement depended on remembering to disable it;
+# leaving it out means it cannot be misused at all. Terminate TLS in the proxy you
+# already run — deploy/README.md has the config, including the headers to set.
+#
+# The network alias is load-bearing, not cosmetic. The app refuses to boot in
+# production if MANDATEX_VERIFIER_URL is plain http on a host that does not end in
+# `.internal` (apps/marketplace-api/src/config.ts). That guard exists so a real
+# deployment cannot accidentally send attestations over cleartext to the public
+# internet, and the `.internal` waiver is narrow on purpose. Giving the verifier
+# the alias `mandatex-verifier.internal` satisfies it honestly: the name resolves
+# only inside this network and never leaves the host.
+#
+# ── ARM ──────────────────────────────────────────────────────────────────────
+#
+# Oracle's generous Always Free shape is Ampere A1, which is aarch64. Every
+# runtime dependency here is pure JavaScript (zod, viem, @bnbagent/sdk), so
+# node:24-slim/arm64 builds natively with no cross-compilation and no gyp. The
+# only native binary anywhere in the tree is fsevents, a macOS-only dev
+# dependency that `pnpm prune --prod` removes during the image build.
+
+name: mandatex
+
+services:
+  # ── The signing half. Holds the private key. Never published. ──────────────
+  verifier:
+    build:
+      context: ..
+      dockerfile: deploy/verifier.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8080"
+      MANDATEX_SIGNING_KEY_ID: ${MANDATEX_SIGNING_KEY_ID:?set this in deploy/.env}
+      # The most sensitive value in the system. It lives in deploy/.env, which is
+      # gitignored, and is never baked into an image layer.
+      MANDATEX_SIGNING_KEY: ${MANDATEX_SIGNING_KEY:?set this in deploy/.env}
+    networks:
+      internal:
+        aliases:
+          # Satisfies the app's production https guard. See the note above.
+          - mandatex-verifier.internal
+    healthcheck:
+      # /healthz, not /readyz. Readiness depends on the app/verifier key
+      # agreement, and gating container health on it would deadlock the first
+      # start of the pair: neither could become healthy until the other was.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── The verifying half. Pins the verifier's PUBLIC key. No signing authority. ──
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/app.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      verifier:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8080"
+      # Read these off the RUNNING verifier's GET /v1/trust, not from what you
+      # believe you configured. Deriving the pin from the deployed verifier is
+      # what makes the pair actually locked together.
+      MANDATEX_TRUST_KEY_ID: ${MANDATEX_TRUST_KEY_ID:?set this in deploy/.env}
+      MANDATEX_TRUST_SPKI_DER_HEX: ${MANDATEX_TRUST_SPKI_DER_HEX:?set this in deploy/.env}
+      MANDATEX_TRUST_KEY_FINGERPRINT_SHA256: ${MANDATEX_TRUST_KEY_FINGERPRINT_SHA256:?set this in deploy/.env}
+      MANDATEX_TRUST_POLICY_SHA256: ${MANDATEX_TRUST_POLICY_SHA256:?set this in deploy/.env}
+      MANDATEX_VERIFIER_URL: http://mandatex-verifier.internal:8080
+      MANDATEX_MAX_CLOCK_SKEW_SECONDS: "30"
+    networks:
+      internal:
+        aliases:
+          - mandatex-app.internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── The interface. Zero production dependencies. Reads the app server-side. ──
+  ui:
+    build:
+      context: ..
+      dockerfile: deploy/ui.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8080"
+      MANDATEX_API_URL: http://mandatex-app.internal:8080
+    # Bound to LOOPBACK only, not 0.0.0.0. Nothing in this stack is reachable from
+    # the internet except through the proxy you point at this port, so a
+    # misconfigured host firewall cannot expose it by accident. Point your existing
+    # nginx, Apache or Caddy at 127.0.0.1:8090.
+    ports:
+      - "127.0.0.1:8090:8080"
+    networks:
+      internal:
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  # Internal only. No service reaches the internet through this network and
+  # nothing outside the host can address it.
+  internal:
+    driver: bridge

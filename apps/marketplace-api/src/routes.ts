@@ -11,6 +11,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import {
+  CATEGORY_POLICIES,
+  MARKETPLACE_CATEGORY_ADAPTER_IDS,
+} from "@mandatex/marketplace-core";
+
 import type { AppConfig } from "./config.js";
 import type { MarketplaceEvaluator } from "./core.js";
 import { buildComparisonView } from "./display.js";
@@ -384,6 +389,52 @@ export function createRouter(config: AppConfig, evaluator: MarketplaceEvaluator)
       return;
     }
 
+    // ── Categories ───────────────────────────────────────────────────────────
+    //
+    // Reports Marketplace Core's own category policy, verbatim. This exists so
+    // that no consumer has to keep a second copy of which categories are
+    // evaluable.
+    //
+    // The UI previously hardcoded that list. That is the kind of duplication that
+    // is correct on the day it is written and wrong the day Core changes, with
+    // nothing to signal the drift: the interface would keep offering or refusing
+    // a category on its own stale authority. Reading it from here means Core is
+    // the single source of truth and the interface simply follows — including
+    // following Core when it says a category is NOT supported, which is the
+    // direction that actually matters.
+    if (path === "/v1/categories" && method === "GET") {
+      json(response, 200, {
+        source: "marketplace-core",
+        note:
+          "Marketplace Core's category policy, reported unchanged. A category is evaluable " +
+          "only when evaluationSupport is 'supported'; anything else must not be offered.",
+        registeredAdapterIds: MARKETPLACE_CATEGORY_ADAPTER_IDS,
+        categories: Object.fromEntries(
+          Object.entries(CATEGORY_POLICIES).map(([category, policy]) => [
+            category,
+            {
+              evaluationSupport: policy.evaluationSupport,
+              // Present only when unsupported: the exact Core code a caller would
+              // receive, so the interface can name the real reason rather than
+              // inventing prose for it.
+              //
+              // A supported category reports `name` for a single adapter or
+              // `names` for several. `health` has two — Aave v3 and Venus — because
+              // BSC has two lending protocols with incompatible interfaces. Both
+              // forms are handled rather than assuming one: collapsing them would
+              // silently drop the second adapter from anything reading this.
+              ...(policy.receiptAdapter.status === "unsupported"
+                ? { unsupportedCode: policy.receiptAdapter.code }
+                : "names" in policy.receiptAdapter
+                  ? { adapters: policy.receiptAdapter.names }
+                  : { adapters: [policy.receiptAdapter.name] }),
+            },
+          ]),
+        ),
+      });
+      return;
+    }
+
     // ── Evaluate ─────────────────────────────────────────────────────────────
     if (path === "/v1/evaluate" && method === "POST") {
       let raw: string;
@@ -473,6 +524,7 @@ export function createRouter(config: AppConfig, evaluator: MarketplaceEvaluator)
           "GET /healthz": "liveness",
           "GET /readyz": "readiness, including verifier key agreement",
           "GET /v1/trust": "the verifier key and policy this API pins",
+          "GET /v1/categories": "Marketplace Core's category policy, reported verbatim",
           "POST /v1/evaluate": "{ mandate, attestations[] } -> ranked comparison view",
           ...(config.exposeFixtures
             ? { "GET /v1/fixtures": "development attestation vectors (non-production only)" }

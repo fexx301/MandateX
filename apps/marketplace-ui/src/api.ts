@@ -32,6 +32,28 @@ export interface FixtureBundle {
   readonly count: number;
 }
 
+/**
+ * Marketplace Core's category policy, as reported by GET /v1/categories.
+ *
+ * `evaluationSupport` is the only field that decides whether a category may be
+ * offered. `unsupportedCode` is Core's own code for the refusal, carried so the
+ * interface can name the real reason instead of inventing prose for it.
+ */
+export interface CategoryPolicyResponse {
+  readonly source: string;
+  readonly registeredAdapterIds: readonly string[];
+  readonly categories: Readonly<
+    Record<
+      string,
+      {
+        readonly evaluationSupport: "supported" | "unsupported";
+        readonly unsupportedCode?: string;
+        readonly adapters?: readonly string[];
+      }
+    >
+  >;
+}
+
 export type ApiResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly status: number; readonly detail: string };
@@ -63,6 +85,19 @@ export class MarketplaceApiClient {
 
   async readyz(): Promise<ApiResult<unknown>> {
     return this.request<unknown>("GET", "/readyz");
+  }
+
+  /**
+   * Marketplace Core's category policy, as the API reports it.
+   *
+   * The interface used to keep its own list of which categories are evaluable.
+   * That is correct on the day it is written and wrong the day Core changes, with
+   * nothing to signal the drift — the form would keep offering or refusing a
+   * category on stale authority. Asking Core through the API means there is one
+   * source of truth and the interface follows it.
+   */
+  async categories(): Promise<ApiResult<CategoryPolicyResponse>> {
+    return this.request<CategoryPolicyResponse>("GET", "/v1/categories");
   }
 
   private async request<T>(
