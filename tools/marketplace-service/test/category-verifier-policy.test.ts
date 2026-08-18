@@ -64,7 +64,7 @@ test("category policy v2 preserves the exact locked v1 base", () => {
       ...BASE_IDENTITY,
       categoryAdapterDeployment: deployment,
     }),
-    "0f8af5895c12cc9cfa2bbcea1625d9c803c2b300fea4a9bfc9e2e8a42e44550c",
+    "b3a22d9628b5ab68e27d973cb1a27b58120647662b7377646f3d8ed56c716372",
   );
 });
 
@@ -88,4 +88,27 @@ test("category policy v2 binds deployment thresholds and rejects extra fields", 
       futurePolicyField: true,
     } as never),
   );
+});
+
+test("category policy v2 snapshots proxy identity fields exactly once", () => {
+  const identity = {
+    ...BASE_IDENTITY,
+    categoryAdapterDeployment: categoryDeployment(),
+  };
+  let gets = 0;
+  const proxy = new Proxy(identity, {
+    get(target, property, receiver) {
+      gets += 1;
+      if (property === "categoryAdapterDeployment") {
+        return categoryDeployment({
+          minLiquidityUsdScaled: "2000000000000000000000",
+        });
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+
+  const manifest = marketplaceVerifierPolicyV2Manifest(proxy);
+  assert.equal(gets, 0);
+  assert.deepEqual(manifest, marketplaceVerifierPolicyV2Manifest(identity));
 });

@@ -29,7 +29,6 @@ export const MARKETPLACE_VERIFIER_POLICY_V2_SCHEMA =
 
 export const MARKETPLACE_VERIFIER_POLICY_V2_PROFILES = Object.freeze({
   categoryVerifierPolicy: CATEGORY_VERIFIER_POLICY_PROFILE,
-  categoryResult: "mandatex.marketplace.category-verifier-result.v1",
   categoryCanonicalization: "mandatex.agent-supply.canonical-quote-json.v1",
   categoryBlockPinning:
     "mandatex.agent-supply.category-block-pinning.head-minus-confirmations.v1",
@@ -66,18 +65,19 @@ export interface MarketplaceVerifierPolicyV2Manifest {
 export function marketplaceVerifierPolicyV2Manifest(
   identity: MarketplaceVerifierPolicyV2Identity,
 ): MarketplaceVerifierPolicyV2Manifest {
-  assertExactPlainObject(
+  const capturedIdentity = snapshotExactPlainObject(
     identity,
     ["passivePolicyFingerprint", "trustPolicySha256", "categoryAdapterDeployment"],
     ["passivePolicyFingerprint", "trustPolicySha256", "categoryAdapterDeployment"],
   );
 
   const base = marketplaceVerifierPolicyManifest({
-    passivePolicyFingerprint: identity.passivePolicyFingerprint,
-    trustPolicySha256: identity.trustPolicySha256,
+    passivePolicyFingerprint:
+      capturedIdentity.passivePolicyFingerprint as string,
+    trustPolicySha256: capturedIdentity.trustPolicySha256 as string,
   });
   const deployment = parseMarketplaceCategoryAdapterDeploymentManifest(
-    identity.categoryAdapterDeployment,
+    capturedIdentity.categoryAdapterDeployment,
   );
   const verifierDeployment = parseCategoryAdapterDeploymentManifest(deployment);
   const deploymentSha256 = marketplaceCategoryAdapterDeploymentSha256(deployment);
@@ -117,17 +117,23 @@ export function marketplaceVerifierPolicyV2Sha256(
   return canonicalSha256(marketplaceVerifierPolicyV2Manifest(identity));
 }
 
-function assertExactPlainObject(
+function snapshotExactPlainObject(
   value: unknown,
   allowedKeys: readonly string[],
   requiredKeys: readonly string[],
-): asserts value is Record<string, unknown> {
+): Readonly<Record<string, unknown>> {
   if (value === null || typeof value !== "object") {
     throw new TypeError("verifier policy identity must be a plain object");
   }
   const object = value as object;
-  const prototype = Object.getPrototypeOf(object);
-  const keys = Reflect.ownKeys(object);
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  try {
+    prototype = Object.getPrototypeOf(object);
+    keys = Reflect.ownKeys(object);
+  } catch {
+    throw new TypeError("verifier policy identity contains unsupported fields");
+  }
   const allowed = new Set(allowedKeys);
   if (
     (prototype !== Object.prototype && prototype !== null) ||
@@ -135,13 +141,20 @@ function assertExactPlainObject(
   ) {
     throw new TypeError("verifier policy identity contains unsupported fields");
   }
+  const keySet = new Set(keys);
   for (const key of requiredKeys) {
-    if (!Object.hasOwn(object, key)) {
+    if (!keySet.has(key)) {
       throw new TypeError(`verifier policy identity is missing: ${key}`);
     }
   }
+  const snapshot = Object.create(null) as Record<string, unknown>;
   for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(object, key);
+    } catch {
+      throw new TypeError("verifier policy identity contains unsupported fields");
+    }
     if (
       descriptor === undefined ||
       !("value" in descriptor) ||
@@ -151,7 +164,14 @@ function assertExactPlainObject(
         "verifier policy identity must contain enumerable data properties only",
       );
     }
+    Object.defineProperty(snapshot, key, {
+      value: descriptor.value,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    });
   }
+  return Object.freeze(snapshot);
 }
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {

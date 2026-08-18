@@ -5,11 +5,11 @@ import {
   type TransportRoute,
   type TrustedCategoryExecutionResult,
 } from "@mandatex/agent-supply-verifier";
+import { canonicalSha256 } from "@mandatex/marketplace-core";
 
 import { MarketplaceServiceError } from "./errors.js";
 import {
   marketplaceVerifierPolicyV2Manifest,
-  marketplaceVerifierPolicyV2Sha256,
   type MarketplaceVerifierPolicyV2Identity,
   type MarketplaceVerifierPolicyV2Manifest,
 } from "./category-verifier-policy.js";
@@ -41,12 +41,12 @@ export interface MarketplaceCategoryVerifierRuntime {
 export function createMarketplaceCategoryVerifierRuntime(
   options: MarketplaceCategoryVerifierRuntimeOptions,
 ): MarketplaceCategoryVerifierRuntime {
-  assertRuntimeOptions(options);
+  const runtimeOptions = parseRuntimeOptions(options);
   let policy: MarketplaceVerifierPolicyV2Manifest;
   let policySha256: string;
   try {
-    policy = marketplaceVerifierPolicyV2Manifest(options.policyIdentity);
-    policySha256 = marketplaceVerifierPolicyV2Sha256(options.policyIdentity);
+    policy = marketplaceVerifierPolicyV2Manifest(runtimeOptions.policyIdentity);
+    policySha256 = canonicalSha256(policy);
   } catch (cause) {
     throw new MarketplaceServiceError(
       "VERIFIER_CONFIGURATION_INVALID",
@@ -54,7 +54,7 @@ export function createMarketplaceCategoryVerifierRuntime(
       { cause },
     );
   }
-  if (policySha256 !== options.verifierPolicySha256) {
+  if (policySha256 !== runtimeOptions.verifierPolicySha256) {
     throw new MarketplaceServiceError(
       "VERIFIER_CONFIGURATION_INVALID",
       "the pinned category verifier-policy hash does not match the category deployment",
@@ -64,11 +64,11 @@ export function createMarketplaceCategoryVerifierRuntime(
   let executor: ReturnType<typeof createCategoryAdapterExecutor>;
   try {
     executor = createCategoryAdapterExecutor({
-      deployment: options.deployment,
+      deployment: runtimeOptions.deployment,
       verifierPolicySha256: policySha256,
-      transport: options.transport,
-      clock: options.clock,
-      randomUUID: options.randomUUID,
+      transport: runtimeOptions.transport,
+      clock: runtimeOptions.clock,
+      randomUUID: runtimeOptions.randomUUID,
     });
   } catch (cause) {
     throw new MarketplaceServiceError(
@@ -117,9 +117,9 @@ export function createMarketplaceCategoryVerifierRuntime(
   });
 }
 
-function assertRuntimeOptions(
+function parseRuntimeOptions(
   value: unknown,
-): asserts value is MarketplaceCategoryVerifierRuntimeOptions {
+): MarketplaceCategoryVerifierRuntimeOptions {
   if (value === null || typeof value !== "object") {
     throw new MarketplaceServiceError(
       "VERIFIER_CONFIGURATION_INVALID",
@@ -127,18 +127,30 @@ function assertRuntimeOptions(
     );
   }
   const object = value as object;
-  const keys = Reflect.ownKeys(object);
-  const allowed = new Set([
+  const allowedKeys = [
     "policyIdentity",
     "deployment",
     "verifierPolicySha256",
     "transport",
     "clock",
     "randomUUID",
-  ]);
+  ] as const;
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  try {
+    prototype = Object.getPrototypeOf(object);
+    keys = Reflect.ownKeys(object);
+  } catch (cause) {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "category verifier runtime options contain unsupported fields",
+      { cause },
+    );
+  }
+  const allowed = new Set<string>(allowedKeys);
   if (
-    (Object.getPrototypeOf(object) !== Object.prototype &&
-      Object.getPrototypeOf(object) !== null) ||
+    (prototype !== Object.prototype && prototype !== null) ||
+    keys.length !== allowedKeys.length ||
     keys.some((key) => typeof key !== "string" || !allowed.has(key))
   ) {
     throw new MarketplaceServiceError(
@@ -146,23 +158,19 @@ function assertRuntimeOptions(
       "category verifier runtime options contain unsupported fields",
     );
   }
-  for (const key of [
-    "policyIdentity",
-    "deployment",
-    "verifierPolicySha256",
-    "transport",
-    "clock",
-    "randomUUID",
-  ]) {
-    if (!Object.hasOwn(object, key)) {
+
+  const snapshot = Object.create(null) as Record<string, unknown>;
+  for (const key of allowedKeys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(object, key);
+    } catch (cause) {
       throw new MarketplaceServiceError(
         "VERIFIER_CONFIGURATION_INVALID",
-        `category verifier runtime options are missing: ${key}`,
+        "category verifier runtime options contain unsupported fields",
+        { cause },
       );
     }
-  }
-  for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(object, key);
     if (
       descriptor === undefined ||
       !("value" in descriptor) ||
@@ -173,26 +181,69 @@ function assertRuntimeOptions(
         "category verifier runtime options must contain enumerable data properties only",
       );
     }
+    Object.defineProperty(snapshot, key, {
+      value: descriptor.value,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    });
   }
+
+  const verifierPolicySha256 = snapshot.verifierPolicySha256;
+  const clock = snapshot.clock;
+  const randomUUID = snapshot.randomUUID;
   if (
-    typeof (value as MarketplaceCategoryVerifierRuntimeOptions).verifierPolicySha256 !==
-      "string" ||
-    !/^[a-f0-9]{64}$/.test(
-      (value as MarketplaceCategoryVerifierRuntimeOptions).verifierPolicySha256,
-    ) ||
-    typeof (value as MarketplaceCategoryVerifierRuntimeOptions).clock !==
-      "function" ||
-    typeof (value as MarketplaceCategoryVerifierRuntimeOptions).randomUUID !==
-      "function" ||
-    (value as MarketplaceCategoryVerifierRuntimeOptions).transport === null ||
-    typeof (value as MarketplaceCategoryVerifierRuntimeOptions).transport !==
-      "object" ||
-    typeof (value as MarketplaceCategoryVerifierRuntimeOptions).transport.request !==
-      "function"
+    typeof verifierPolicySha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(verifierPolicySha256) ||
+    typeof clock !== "function" ||
+    typeof randomUUID !== "function"
   ) {
     throw new MarketplaceServiceError(
       "VERIFIER_CONFIGURATION_INVALID",
       "category verifier runtime options contain invalid transport, clock, UUID, or policy values",
     );
   }
+
+  return Object.freeze({
+    policyIdentity: snapshot.policyIdentity as MarketplaceVerifierPolicyV2Identity,
+    deployment: snapshot.deployment,
+    verifierPolicySha256,
+    transport: captureTransport(snapshot.transport),
+    clock: clock as () => number,
+    randomUUID: randomUUID as () => string,
+  });
+}
+
+function captureTransport(
+  value: unknown,
+): MarketplaceCategoryVerifierRuntimeOptions["transport"] {
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function")
+  ) {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "category verifier runtime options contain invalid transport, clock, UUID, or policy values",
+    );
+  }
+  let request: unknown;
+  try {
+    request = Reflect.get(value, "request");
+  } catch (cause) {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "category verifier runtime options contain invalid transport, clock, UUID, or policy values",
+      { cause },
+    );
+  }
+  if (typeof request !== "function") {
+    throw new MarketplaceServiceError(
+      "VERIFIER_CONFIGURATION_INVALID",
+      "category verifier runtime options contain invalid transport, clock, UUID, or policy values",
+    );
+  }
+  const receiver = value;
+  return Object.freeze({
+    request: (route: TransportRoute) => request.call(receiver, route),
+  });
 }

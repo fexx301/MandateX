@@ -75,10 +75,12 @@ default. The Venus metric metadata explicitly includes the monitored-market
 market, not proof that the account has no debt anywhere. A development-only
 conformance check compares every adapter by ID,
 including evidence schema, protocol, profile, metric, and exact read descriptors,
-with the standalone adapter package without adding that package to the signing
-runtime. Run it separately with `corepack pnpm run test:category-contract` after
-the adapter package parses and builds; it remains outside the core unit-test
-command because that package is a separate ownership boundary.
+with the standalone adapter package. The production category executor already
+depends on that package; this check keeps the duplicated service/verifier policy
+literals in byte-for-byte agreement. Run it separately with
+`corepack pnpm run test:category-contract` after the adapter package parses and
+builds; it remains outside the core unit-test command because that package is a
+separate ownership boundary.
 
 At construction, manifest, passive-report, and trust-file inputs are parsed
 into detached recursively frozen copies. The transport is retained only as a

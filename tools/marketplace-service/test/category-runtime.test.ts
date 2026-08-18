@@ -9,10 +9,12 @@ import {
   type BoundedHttpResponse,
   type TransportRoute,
 } from "@mandatex/agent-supply-verifier";
+import { canonicalSha256 } from "@mandatex/marketplace-core";
 import { encodeAbiParameters, parseAbiParameters, type Hex } from "viem";
 
 import {
   createMarketplaceCategoryVerifierRuntime,
+  marketplaceVerifierPolicyV2Manifest,
   marketplaceVerifierPolicyV2Sha256,
 } from "../src/index.js";
 import { MarketplaceServiceError } from "../src/errors.js";
@@ -200,6 +202,67 @@ test("category runtime fails closed before anchoring, on reorg, and on policy mi
       error instanceof MarketplaceServiceError &&
       error.code === "VERIFIER_CONFIGURATION_INVALID",
   );
+});
+
+test("category runtime snapshots proxy options and hashes the exact exposed policy", async () => {
+  const deployment = categoryDeployment();
+  const policyIdentity = {
+    ...POLICY_IDENTITY,
+    categoryAdapterDeployment: deployment,
+  };
+  const expectedPolicy = marketplaceVerifierPolicyV2Manifest(policyIdentity);
+  const expectedPolicySha256 = canonicalSha256(expectedPolicy);
+  const alternateDeployment = categoryDeployment({
+    minLiquidityUsdScaled: "2000000000000000000000",
+  });
+  let optionGets = 0;
+  let identityGets = 0;
+  const identityProxy = new Proxy(policyIdentity, {
+    get(target, property, receiver) {
+      identityGets += 1;
+      if (property === "categoryAdapterDeployment") {
+        return alternateDeployment;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const alternateIdentity = {
+    ...POLICY_IDENTITY,
+    categoryAdapterDeployment: alternateDeployment,
+  };
+  const options = {
+    policyIdentity: identityProxy,
+    deployment,
+    verifierPolicySha256: expectedPolicySha256,
+    transport: categoryTransport([]),
+    clock: () => EVALUATED_AT,
+    randomUUID: () => "category-proxy-test-id",
+  };
+  const runtime = createMarketplaceCategoryVerifierRuntime(
+    new Proxy(options, {
+      get(target, property, receiver) {
+        optionGets += 1;
+        if (property === "policyIdentity") return alternateIdentity;
+        return Reflect.get(target, property, receiver);
+      },
+    }),
+  );
+
+  assert.equal(optionGets, 0);
+  assert.equal(identityGets, 0);
+  assert.equal(runtime.policySha256, expectedPolicySha256);
+  assert.equal(
+    canonicalSha256(runtime.policy),
+    runtime.policySha256,
+  );
+  const result = await runtime.evaluateCategory({ category: "health" });
+  assert.equal(result.outcome, "executed", JSON.stringify(result));
+  if (result.outcome === "executed") {
+    assert.equal(
+      result.artifact.verifierPolicySha256,
+      runtime.policySha256,
+    );
+  }
 });
 
 function createRuntime(
