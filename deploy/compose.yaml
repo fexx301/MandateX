@@ -58,6 +58,15 @@ services:
         aliases:
           # Satisfies the app's production https guard. See the note above.
           - mandatex-verifier.internal
+    # Ceiling, not a reservation: this caps runaway growth without claiming
+    # memory up front. Sized at roughly 3x the 81 MiB measured, so normal operation is
+    # nowhere near it but a leak cannot starve a neighbouring process on a
+    # shared host. Without this, the kernel's OOM killer picks the largest
+    # process on the box, which may well be something else entirely.
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     healthcheck:
       # /healthz, not /readyz. Readiness depends on the app/verifier key
       # agreement, and gating container health on it would deadlock the first
@@ -94,6 +103,15 @@ services:
       internal:
         aliases:
           - mandatex-app.internal
+    # Ceiling, not a reservation: this caps runaway growth without claiming
+    # memory up front. Sized at roughly 3x the 36 MiB measured, so normal operation is
+    # nowhere near it but a leak cannot starve a neighbouring process on a
+    # shared host. Without this, the kernel's OOM killer picks the largest
+    # process on the box, which may well be something else entirely.
+    deploy:
+      resources:
+        limits:
+          memory: 160M
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -123,6 +141,15 @@ services:
       - "127.0.0.1:8090:8080"
     networks:
       internal:
+    # Ceiling, not a reservation: this caps runaway growth without claiming
+    # memory up front. Sized at roughly 3x the zero production dependencies, so normal operation is
+    # nowhere near it but a leak cannot starve a neighbouring process on a
+    # shared host. Without this, the kernel's OOM killer picks the largest
+    # process on the box, which may well be something else entirely.
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
