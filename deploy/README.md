@@ -241,6 +241,84 @@ API outage does not present as a UI bug. It is still not the deploy gate, for th
 deadlock reason: the UI is deployed last, and gating its first deploy on the app being
 ready would couple three services into one failure.
 
+## Getting a public URL with a Cloudflare Tunnel
+
+The compose stack binds only `127.0.0.1:8090`, so something has to publish it. A
+Cloudflare Tunnel is the least-moving-parts option and the one to reach for when
+there is no domain, no working card, or no wish to open a firewall port:
+
+- no DNS record to create and no certificate to obtain — the tunnel terminates TLS
+  at Cloudflare's edge;
+- **no inbound port at all**, because `cloudflared` dials outward. This sidesteps
+  both the AWS security-group step and the Oracle double-firewall trap, where the
+  VCN security list and the instance's local `iptables` must each be opened and
+  people routinely open only the first;
+- free, and it needs no payment method.
+
+It also avoids the failure mode of the current agent hostname. `bnb-lp.172-104-171-139.nip.io`
+is wildcard DNS that encodes the server's IP directly in the name: it publishes the
+address, depends on a third party staying up, and reads as a development setup to
+anyone who looks at it.
+
+### Quick tunnel — for a first check
+
+```bash
+# with the stack already up, so there is something to proxy
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/   # expect 200
+
+cloudflared tunnel --url http://127.0.0.1:8090
+```
+
+It prints a `https://<random>.trycloudflare.com` URL that works immediately.
+
+**Do not submit that URL.** A quick tunnel's hostname is regenerated every restart,
+so a reboot during judging silently invalidates whatever was submitted. Use it to
+confirm the path works, then move to a named tunnel.
+
+### Named tunnel — for anything judged
+
+Needs a free Cloudflare account with a domain on it. The hostname is then stable
+across restarts and the tunnel runs as a service.
+
+```bash
+cloudflared tunnel login                       # browser auth, selects the zone
+cloudflared tunnel create mandatex             # writes ~/.cloudflared/<uuid>.json
+cloudflared tunnel route dns mandatex mandatex.yourdomain.com
+```
+
+`~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: mandatex
+credentials-file: /home/USER/.cloudflared/<uuid>.json
+ingress:
+  - hostname: mandatex.yourdomain.com
+    service: http://127.0.0.1:8090
+  # Required: cloudflared refuses to start without a terminating catch-all.
+  - service: http_status:404
+```
+
+Then install it so it survives a reboot — which is the whole point, since the
+judging window is longer than one uptime:
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+systemctl status cloudflared --no-pager
+```
+
+### What the tunnel does not change
+
+The trust boundary is unaffected. The tunnel publishes the **UI only**; the app and
+the verifier stay on the private compose network, and the verifier still has no
+`ports:` stanza, so the process holding the signing key remains unreachable from
+outside the host regardless of what is tunnelled.
+
+Security headers still come from the app rather than the edge — CSP,
+`frame-ancestors`, `nosniff` and `referrer-policy` are set in `sendHtml`, so they
+hold whether traffic arrives through a tunnel, an nginx proxy, or directly. HSTS is
+the exception and belongs at whatever terminates TLS, which here is Cloudflare.
+
 ## Cost
 
 Railway Hobby is $5/mo including $5 of usage credit, billed on **measured** RAM
