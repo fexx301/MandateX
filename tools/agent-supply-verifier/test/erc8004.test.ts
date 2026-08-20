@@ -12,6 +12,7 @@ import type {
 } from "../src/transport/http.js";
 
 const OWNER = "0x20f1ca5d1e5a3ee94c29dbf95e6bf6cea6a8d64b";
+const REGISTRY = "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432";
 const BLOCK_A = `0x${"ab".repeat(32)}`;
 const BLOCK_B = `0x${"cd".repeat(32)}`;
 const BLOCK_C = `0x${"ef".repeat(32)}`;
@@ -27,6 +28,7 @@ test("ERC-8004 ownership uses one canonical N-2 EIP-1898 snapshot", async () => 
     transport,
     chainId: 56,
     tokenId: "265375",
+    registryAddress: REGISTRY,
   });
 
   assert.equal(result.status, "verified");
@@ -84,6 +86,7 @@ test("canonical hash mismatch retries the whole snapshot once without mixing att
     transport,
     chainId: 56,
     tokenId: "265375",
+    registryAddress: REGISTRY,
   });
   assert.equal(result.status, "verified");
   if (result.status !== "verified") return;
@@ -117,11 +120,32 @@ test("canonical propagation exhaustion remains inconclusive", async () => {
     transport,
     chainId: 56,
     tokenId: "265375",
+    registryAddress: REGISTRY,
   });
   assert.equal(result.status, "inconclusive");
   if (result.status !== "inconclusive") return;
   assert.equal(result.code, "SNAPSHOT_INCONSISTENT");
   assert.equal(result.attempts, 2);
+});
+
+test("a shared anchor remains valid when the head advances after pinning", async () => {
+  const transport = rpcTransport((request) => {
+    if (request.method === "eth_blockNumber") return "0x65";
+    if (request.method === "eth_getBlockByNumber") {
+      return { number: "0x62", hash: BLOCK_A, timestamp: "0x64" };
+    }
+    return successfulRpcResult(request, BLOCK_A);
+  });
+  const result = await verifyErc8004Ownership({
+    transport,
+    chainId: 56,
+    tokenId: "265375",
+    registryAddress: REGISTRY,
+    sharedAnchor: { number: 98, hash: BLOCK_A, timestamp: 100 },
+  });
+  assert.equal(result.status, "verified");
+  if (result.status !== "verified") return;
+  assert.equal(result.snapshot.observedBlockNumber, "98");
 });
 
 function successfulRpcResult(

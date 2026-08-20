@@ -310,6 +310,7 @@ export type TrustedCategoryExecutionSuccess = Readonly<
 
 export type CategoryExecutionInconclusiveCode =
   | "CATEGORY_ADAPTER_NOT_CONFIGURED"
+  | "CATEGORY_ADAPTER_SELECTION_REQUIRED"
   | "CATEGORY_BLOCK_PIN_UNAVAILABLE"
   | "CATEGORY_BLOCK_NONCANONICAL"
   | "CATEGORY_ADAPTER_EXECUTION_INVALID";

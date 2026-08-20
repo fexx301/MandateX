@@ -1,6 +1,5 @@
 import {
   CATEGORY_ADAPTER_REGISTRY,
-  DEFAULT_MIN_HEALTH_FACTOR_SCALED,
   GRID_ADAPTER_ID,
   GRID_EVIDENCE_SCHEMA,
   HEALTH_ADAPTER_ID,
@@ -74,9 +73,7 @@ const healthConfigurationSchema = z
   .object({
     poolAddress: evmAddressSchema,
     accountAddress: evmAddressSchema,
-    minHealthFactorScaled: uint256DecimalSchema.default(
-      DEFAULT_MIN_HEALTH_FACTOR_SCALED,
-    ),
+    minHealthFactorScaled: uint256DecimalSchema,
   })
   .strict();
 
@@ -232,30 +229,24 @@ const normalizedCategoryAdapterDeploymentSchema = z
       });
     }
 
-    const enabledByCategory = new Map<string, number[]>();
     for (const [index, entry] of manifest.adapters.entries()) {
       const hasConfiguration = Object.hasOwn(entry, "configuration");
-      if (entry.enabled !== hasConfiguration || entry.configuration === undefined && hasConfiguration) {
+      if (!entry.enabled && hasConfiguration) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["adapters", index, "configuration"],
           message:
-            "enabled entries require configuration and disabled entries must omit it",
+            "disabled entries must omit configuration",
         });
       }
-      if (entry.enabled) {
-        const indexes = enabledByCategory.get(entry.category) ?? [];
-        indexes.push(index);
-        enabledByCategory.set(entry.category, indexes);
-      }
-    }
-    for (const [category, indexes] of enabledByCategory) {
-      if (indexes.length <= 1) continue;
-      for (const index of indexes) {
+      // A production deployment may carry only static adapter policy. The
+      // optional configuration is retained solely for the legacy configured
+      // executor path; mandate-scoped execution supplies dynamic values.
+      if (hasConfiguration && entry.configuration === undefined) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["adapters", index, "enabled"],
-          message: `at most one adapter may be enabled for category ${category}`,
+          path: ["adapters", index, "configuration"],
+          message: "configuration must not be explicitly undefined",
         });
       }
     }

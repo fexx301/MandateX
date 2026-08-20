@@ -358,7 +358,6 @@ function rebalancingFindings(
       future: "REPUTATION_TIMESTAMP_IN_FUTURE",
     },
   );
-
   if (quote.normalization.status === "inconclusive") {
     findings.push(inconclusiveFinding(quote.normalization.code));
   }

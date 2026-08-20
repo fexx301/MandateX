@@ -26,6 +26,7 @@ import {
   type ScanAgentDetail,
 } from "./sources/8004scan.js";
 import {
+  BSC_MAINNET,
   verifyErc8004Ownership,
   type Erc8004Result,
 } from "./sources/erc8004.js";
@@ -149,6 +150,7 @@ async function verifyCandidate(options: {
     transport,
     chainId: candidate.chainId,
     tokenId: candidate.tokenId,
+    registryAddress: BSC_MAINNET.registryAddress,
   });
   sources.push(chainSourceObservation(chainResult, now));
   applyChainEvidence(chainResult, evidence, gates, errors, now);

@@ -70,7 +70,7 @@ function yieldDeployment() {
   };
 }
 
-function aaveHealthDeployment(includeDefault = false) {
+function aaveHealthDeployment() {
   return {
     adapterId: "aave-v3-health-v1" as const,
     category: "health" as const,
@@ -89,9 +89,7 @@ function aaveHealthDeployment(includeDefault = false) {
     configuration: {
       poolAddress: ADDRESS_C,
       accountAddress: ADDRESS_D,
-      ...(includeDefault
-        ? { minHealthFactorScaled: "1100000000000000000" }
-        : {}),
+      minHealthFactorScaled: "1100000000000000000",
     },
   };
 }
@@ -151,7 +149,7 @@ function disabledManifest() {
   return deploymentManifest([
     disabledDeployment(venusHealthDeployment()),
     disabledDeployment(gridDeployment()),
-    disabledDeployment(aaveHealthDeployment(true)),
+    disabledDeployment(aaveHealthDeployment()),
     disabledDeployment(yieldDeployment()),
   ]);
 }
@@ -220,15 +218,20 @@ test("adapter deployment identity is canonical, explicit, and detached", () => {
   assert.equal(Object.isFrozen(parsed.adapters), true);
   assert.equal(Object.isFrozen(aave.configuration), true);
 
-  const explicitDefault = deploymentManifest([
+  const missingThreshold = deploymentManifest([
     disabledDeployment(yieldDeployment()),
     disabledDeployment(venusHealthDeployment()),
-    aaveHealthDeployment(true),
+    {
+      ...aaveHealthDeployment(),
+      configuration: {
+        poolAddress: ADDRESS_C,
+        accountAddress: ADDRESS_D,
+      },
+    },
     gridDeployment(),
   ]);
-  assert.equal(
-    marketplaceCategoryAdapterDeploymentSha256(input),
-    marketplaceCategoryAdapterDeploymentSha256(explicitDefault),
+  assert.throws(
+    () => parseMarketplaceCategoryAdapterDeploymentManifest(missingThreshold),
   );
 
   (input.adapters[0] as any).enabled = true;
@@ -257,7 +260,7 @@ test("every enabled deployment address and threshold is committed by the hash", 
   const aaveBase = deploymentManifest([
     gridDeployment(),
     yieldDeployment(),
-    aaveHealthDeployment(true),
+    aaveHealthDeployment(),
     disabledDeployment(venusHealthDeployment()),
   ]);
   const aaveBaseline = marketplaceCategoryAdapterDeploymentSha256(aaveBase);
@@ -304,7 +307,7 @@ test("every enabled deployment address and threshold is committed by the hash", 
   const venusBase = deploymentManifest([
     disabledDeployment(gridDeployment()),
     disabledDeployment(yieldDeployment()),
-    disabledDeployment(aaveHealthDeployment(true)),
+    disabledDeployment(aaveHealthDeployment()),
     venusHealthDeployment(),
   ]);
   const venusBaseline = marketplaceCategoryAdapterDeploymentSha256(venusBase);
@@ -331,27 +334,25 @@ test("every enabled deployment address and threshold is committed by the hash", 
   }
 });
 
-test("adapter deployment parsing rejects incomplete or ambiguous policy", () => {
+test("adapter deployment parsing rejects incomplete policy but permits both health adapters", () => {
   const valid = deploymentManifest([
     gridDeployment(),
     yieldDeployment(),
-    aaveHealthDeployment(true),
+    aaveHealthDeployment(),
     disabledDeployment(venusHealthDeployment()),
   ]);
-  const missingGridConfiguration = disabledDeployment(gridDeployment()) as any;
-  missingGridConfiguration.enabled = true;
   const invalid = [
     deploymentManifest([]),
     deploymentManifest([
       gridDeployment(),
       gridDeployment(),
-      aaveHealthDeployment(true),
+      aaveHealthDeployment(),
       disabledDeployment(venusHealthDeployment()),
     ]),
     deploymentManifest([
       gridDeployment(),
       yieldDeployment(),
-      aaveHealthDeployment(true),
+      aaveHealthDeployment(),
     ]),
     {
       schema: "mandatex.marketplace.category-deployment.v1",
@@ -369,7 +370,7 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
           },
         },
         yieldDeployment(),
-        aaveHealthDeployment(true),
+        aaveHealthDeployment(),
         disabledDeployment(venusHealthDeployment()),
       ],
     },
@@ -378,7 +379,7 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
       adapters: [
         { ...gridDeployment(), enabled: false },
         yieldDeployment(),
-        aaveHealthDeployment(true),
+        aaveHealthDeployment(),
         disabledDeployment(venusHealthDeployment()),
       ],
     },
@@ -388,7 +389,7 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
         configuration: { ...gridDeployment().configuration, lowerTick: -887_273 },
       },
       yieldDeployment(),
-      aaveHealthDeployment(true),
+      aaveHealthDeployment(),
       disabledDeployment(venusHealthDeployment()),
     ]),
     deploymentManifest([
@@ -400,20 +401,14 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
           minSharePriceScaled: (1n << 256n).toString(10),
         },
       },
-      aaveHealthDeployment(true),
-      disabledDeployment(venusHealthDeployment()),
-    ]),
-    deploymentManifest([
-      missingGridConfiguration,
-      disabledDeployment(yieldDeployment()),
-      disabledDeployment(aaveHealthDeployment(true)),
+      aaveHealthDeployment(),
       disabledDeployment(venusHealthDeployment()),
     ]),
     deploymentManifest([
       disabledDeployment(gridDeployment()),
       disabledDeployment(yieldDeployment()),
       {
-        ...disabledDeployment(aaveHealthDeployment(true)),
+        ...disabledDeployment(aaveHealthDeployment()),
         configuration: undefined,
       },
       disabledDeployment(venusHealthDeployment()),
@@ -421,13 +416,7 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
     deploymentManifest([
       disabledDeployment(gridDeployment()),
       disabledDeployment(yieldDeployment()),
-      aaveHealthDeployment(true),
-      venusHealthDeployment(),
-    ]),
-    deploymentManifest([
-      disabledDeployment(gridDeployment()),
-      disabledDeployment(yieldDeployment()),
-      disabledDeployment(aaveHealthDeployment(true)),
+      disabledDeployment(aaveHealthDeployment()),
       {
         ...venusHealthDeployment(),
         configuration: {
@@ -440,7 +429,7 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
     deploymentManifest([
       disabledDeployment(gridDeployment()),
       disabledDeployment(yieldDeployment()),
-      disabledDeployment(aaveHealthDeployment(true)),
+      disabledDeployment(aaveHealthDeployment()),
       {
         ...venusHealthDeployment(),
         configuration: {
@@ -456,6 +445,24 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
     assert.throws(() => parseMarketplaceCategoryAdapterDeploymentManifest(value));
   }
 
+  const staticOnly = deploymentManifest([
+    { ...disabledDeployment(gridDeployment()), enabled: true },
+    disabledDeployment(yieldDeployment()),
+    disabledDeployment(aaveHealthDeployment()),
+    disabledDeployment(venusHealthDeployment()),
+  ]);
+  const parsedStaticOnly = parseMarketplaceCategoryAdapterDeploymentManifest(
+    staticOnly,
+  );
+  const staticGrid = parsedStaticOnly.adapters.find(
+    (entry) => entry.adapterId === "pancakeswap-v3-grid-v1",
+  );
+  assert.equal(staticGrid?.enabled, true);
+  assert.equal(
+    staticGrid === undefined || Object.hasOwn(staticGrid, "configuration"),
+    false,
+  );
+
   const parsedDisabled = parseMarketplaceCategoryAdapterDeploymentManifest(
     disabledManifest(),
   );
@@ -463,5 +470,18 @@ test("adapter deployment parsing rejects incomplete or ambiguous policy", () => 
   assert.equal(
     parsedDisabled.adapters.some((entry) => Object.hasOwn(entry, "configuration")),
     false,
+  );
+
+  const bothHealth = parseMarketplaceCategoryAdapterDeploymentManifest(
+    deploymentManifest([
+      disabledDeployment(gridDeployment()),
+      disabledDeployment(yieldDeployment()),
+      aaveHealthDeployment(),
+      venusHealthDeployment(),
+    ]),
+  );
+  assert.deepEqual(
+    bothHealth.adapters.filter((entry) => entry.category === "health").map((entry) => entry.adapterId),
+    ["aave-v3-health-v1", "venus-health-v1"],
   );
 });

@@ -12,6 +12,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./internal/category-linkage": {
+      "types": "./dist/internal/category-linkage.d.ts",
+      "import": "./dist/internal/category-linkage.js"
+    },
+    "./internal/successor-contract": {
+      "types": "./dist/internal/successor-contract.d.ts",
+      "import": "./dist/internal/successor-contract.js"
+    },
+    "./internal/trust-controller": {
+      "types": "./dist/internal/trust-controller.d.ts",
+      "import": "./dist/internal/trust-controller.js"
+    },
+    "./internal/trust-bundle": {
+      "types": "./dist/trust-bundle.d.ts",
+      "import": "./dist/trust-bundle.js"
     }
   },
   "files": [

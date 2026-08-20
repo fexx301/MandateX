@@ -25,6 +25,14 @@ test("canonical JSON rejects unsafe non-JSON values", () => {
   assert.throws(() => canonicalJson(new Date(0)));
 });
 
+test("canonical JSON rejects ECMAScript array-index property names", () => {
+  for (const key of ["0", "1", "4294967294"]) {
+    assert.throws(() => canonicalJson({ nested: { [key]: "value" } }));
+  }
+  assert.equal(canonicalJson({ "00": 1 }), '{"00":1}');
+  assert.equal(canonicalJson({ "4294967295": 1 }), '{"4294967295":1}');
+});
+
 test("canonical SHA-256 is stable", () => {
   assert.equal(
     canonicalSha256({ b: 2, a: 1 }),

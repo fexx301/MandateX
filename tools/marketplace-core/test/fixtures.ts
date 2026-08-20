@@ -32,6 +32,7 @@ export interface QuoteOptions {
   readonly evidenceConfidenceBps?: number;
   readonly triggerFired?: boolean;
   readonly endpoint?: "pass" | "fail" | "unknown";
+  readonly categoryVerification?: "pass" | "fail" | "unknown";
   readonly preview?: "passed" | "failed" | "unavailable";
   readonly proposedLowerTick?: number;
   readonly proposedUpperTick?: number;
@@ -43,6 +44,8 @@ export interface QuoteOptions {
   readonly observedAt?: number;
   readonly estimatesObservedAt?: number;
   readonly previewObservedAt?: number;
+  readonly previewObservedBlock?: number;
+  readonly previewObservedBlockHash?: string;
   readonly reputationObservedAt?: number;
   readonly categoryEvidenceObservedAt?: number;
   readonly currentTick?: number;
@@ -153,7 +156,7 @@ export function rawProjection(options: QuoteOptions = {}): Record<string, unknow
       publisher: "pass",
       endpoint: options.endpoint ?? "pass",
       taskInterface: "pass",
-      category: "pass",
+      category: options.categoryVerification ?? "pass",
       quoteCompleteness: "pass",
     },
     preview:
@@ -164,8 +167,8 @@ export function rawProjection(options: QuoteOptions = {}): Record<string, unknow
           : {
               status: "passed",
               observedAt: options.previewObservedAt ?? observedAt,
-              observedBlock: 123,
-              observedBlockHash: BLOCK_HASH,
+              observedBlock: options.previewObservedBlock ?? 123,
+              observedBlockHash: options.previewObservedBlockHash ?? BLOCK_HASH,
             },
     reputation: {
       scoreBps: options.reputationScoreBps ?? 8_000,

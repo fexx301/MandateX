@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import {
   CATEGORY_ADAPTER_REGISTRY,
-  DEFAULT_MIN_HEALTH_FACTOR_SCALED,
   GRID_ADAPTER_ID,
   GRID_EVIDENCE_SCHEMA,
   HEALTH_ADAPTER_ID,
@@ -184,6 +183,7 @@ const aaveEnabled = {
           configuration: {
             poolAddress: addresses.healthPool,
             accountAddress: addresses.healthAccount,
+            minHealthFactorScaled: "1100000000000000000",
           },
         }
       : entry,
@@ -193,7 +193,7 @@ const parsedAave = parseMarketplaceCategoryAdapterDeploymentManifest(aaveEnabled
 assert.equal(
   parsedAave.adapters.find((entry) => entry.adapterId === HEALTH_ADAPTER_ID)
     ?.configuration.minHealthFactorScaled,
-  DEFAULT_MIN_HEALTH_FACTOR_SCALED,
+  "1100000000000000000",
 );
 
 const venusConfig = {

@@ -212,6 +212,93 @@ export function createMarketplaceAttestationSigner(
     );
   }
 
+  const issueSignedPayload = (
+    mandate: MarketplaceMandate,
+    payload: DisplaySafeQuoteProjectionPayload,
+  ): IssuedMarketplaceEvaluationAttestation => {
+    if (
+      payload.mandateId !== mandate.mandateId ||
+      payload.category !== mandate.category
+    ) {
+      throw new MarketplaceServiceError(
+        "MAPPING_FAILED",
+        "category and mandate identity do not match the signed payload",
+      );
+    }
+    const issuedAt = readClock(clock);
+    assertObservationChronology(payload, issuedAt);
+    const expiresAt = Math.min(
+      issuedAt + MAX_MARKETPLACE_ATTESTATION_TTL_SECONDS,
+      payload.expiresAt,
+    );
+    if (expiresAt <= issuedAt) {
+      throw new MarketplaceServiceError(
+        "ATTESTATION_EXPIRY_INVALID",
+        "marketplace evaluation evidence expires before it can be attested",
+      );
+    }
+
+    let attestationId: string;
+    try {
+      attestationId = randomUUID();
+    } catch (cause) {
+      throw new MarketplaceServiceError(
+        "ATTESTATION_SIGNER_INVALID",
+        "the attestation ID generator failed",
+        { cause },
+      );
+    }
+
+    let unsigned;
+    try {
+      unsigned = marketplaceEvaluationAttestationUnsignedSchema.parse({
+        schema: MARKETPLACE_EVALUATION_ATTESTATION_SCHEMA,
+        signatureProfile: MARKETPLACE_ATTESTATION_SIGNATURE_PROFILE,
+        issuer: MARKETPLACE_ATTESTATION_ISSUER,
+        audience: MARKETPLACE_ATTESTATION_AUDIENCE,
+        keyId,
+        attestationId,
+        scope: "evaluation_only",
+        activationAuthorization: "none",
+        reservation: "none",
+        replayPolicy: "reusable_until_expiry",
+        issuedAt,
+        expiresAt,
+        mandateSha256: canonicalSha256(mandate),
+        payloadSha256: canonicalSha256(payload),
+        verifierPolicySha256,
+        payload,
+      });
+    } catch (cause) {
+      throw new MarketplaceServiceError(
+        "ATTESTATION_SIGNER_INVALID",
+        "the verifier runtime could not construct a valid attestation envelope",
+        { cause },
+      );
+    }
+
+    let signature: string;
+    try {
+      signature = signEd25519(
+        null,
+        marketplaceEvaluationAttestationSigningMessage(unsigned),
+        privateKey,
+      ).toString("hex");
+    } catch (cause) {
+      throw new MarketplaceServiceError(
+        "SIGNING_FAILED",
+        "the verifier runtime could not sign the evaluation attestation",
+        { cause },
+      );
+    }
+    const attestation = {
+      ...unsigned,
+      signature,
+    } satisfies MarketplaceEvaluationAttestation;
+    const wire = serializeMarketplaceEvaluationAttestation(attestation);
+    return deepFreeze({ mandate, payload, attestation, wire });
+  };
+
   return Object.freeze({
     get pinnedTrust(): MarketplaceAttestationTrust {
       return Object.freeze({
@@ -242,78 +329,7 @@ export function createMarketplaceAttestationSigner(
 
       const mandate = buildMarketplaceMandate(request);
       const payload = buildDisplaySafeProjectionPayload(request, result);
-      const issuedAt = readClock(clock);
-      assertObservationChronology(payload, issuedAt);
-      const expiresAt = Math.min(
-        issuedAt + MAX_MARKETPLACE_ATTESTATION_TTL_SECONDS,
-        payload.expiresAt,
-      );
-      if (expiresAt <= issuedAt) {
-        throw new MarketplaceServiceError(
-          "ATTESTATION_EXPIRY_INVALID",
-          "marketplace evaluation evidence expires before it can be attested",
-        );
-      }
-
-      let attestationId: string;
-      try {
-        attestationId = randomUUID();
-      } catch (cause) {
-        throw new MarketplaceServiceError(
-          "ATTESTATION_SIGNER_INVALID",
-          "the attestation ID generator failed",
-          { cause },
-        );
-      }
-
-      let unsigned;
-      try {
-        unsigned = marketplaceEvaluationAttestationUnsignedSchema.parse({
-          schema: MARKETPLACE_EVALUATION_ATTESTATION_SCHEMA,
-          signatureProfile: MARKETPLACE_ATTESTATION_SIGNATURE_PROFILE,
-          issuer: MARKETPLACE_ATTESTATION_ISSUER,
-          audience: MARKETPLACE_ATTESTATION_AUDIENCE,
-          keyId,
-          attestationId,
-          scope: "evaluation_only",
-          activationAuthorization: "none",
-          reservation: "none",
-          replayPolicy: "reusable_until_expiry",
-          issuedAt,
-          expiresAt,
-          mandateSha256: canonicalSha256(mandate),
-          payloadSha256: canonicalSha256(payload),
-          verifierPolicySha256,
-          payload,
-        });
-      } catch (cause) {
-        throw new MarketplaceServiceError(
-          "ATTESTATION_SIGNER_INVALID",
-          "the verifier runtime could not construct a valid attestation envelope",
-          { cause },
-        );
-      }
-
-      let signature: string;
-      try {
-        signature = signEd25519(
-          null,
-          marketplaceEvaluationAttestationSigningMessage(unsigned),
-          privateKey,
-        ).toString("hex");
-      } catch (cause) {
-        throw new MarketplaceServiceError(
-          "SIGNING_FAILED",
-          "the verifier runtime could not sign the evaluation attestation",
-          { cause },
-        );
-      }
-      const attestation = {
-        ...unsigned,
-        signature,
-      } satisfies MarketplaceEvaluationAttestation;
-      const wire = serializeMarketplaceEvaluationAttestation(attestation);
-      return deepFreeze({ mandate, payload, attestation, wire });
+      return issueSignedPayload(mandate, payload);
     },
   });
 }

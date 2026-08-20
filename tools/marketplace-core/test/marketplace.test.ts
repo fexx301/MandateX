@@ -3,7 +3,12 @@ import test from "node:test";
 
 import * as publicApi from "../src/index.js";
 import { createProjectionCapability } from "../src/capture.js";
-import { CATEGORY_POLICIES } from "../src/category-policy.js";
+import {
+  CATEGORY_ADAPTER_REGISTRY,
+  CATEGORY_POLICIES,
+  MARKETPLACE_CATEGORY_ADAPTER_IDS,
+  MARKETPLACE_HEALTH_ADAPTERS,
+} from "../src/category-policy.js";
 import { normalizeCapturedQuote } from "../src/normalize.js";
 import {
   CandidateSetError,
@@ -42,6 +47,14 @@ function hasErrorCode(code: MarketplaceErrorCode) {
   return (error: unknown): boolean =>
     error instanceof MarketplaceCoreError && error.code === code;
 }
+
+test("category policy and adapter IDs are reachable from the package entry point", () => {
+  assert.equal(publicApi.CATEGORY_POLICIES, CATEGORY_POLICIES);
+  assert.equal(
+    publicApi.MARKETPLACE_CATEGORY_ADAPTER_IDS,
+    MARKETPLACE_CATEGORY_ADAPTER_IDS,
+  );
+});
 
 test("happy path produces four validated artifacts and a deterministic ranking", () => {
   const result = evaluateMarketplace({
@@ -198,7 +211,44 @@ test("unsupported category policy takes precedence over nonzero pricing", () => 
   assert.equal(result.decisions[0]?.outcome, "unsupported");
 });
 
-test("the closed category policy table is exhaustive and recursively frozen", () => {
+test("compact category evidence remains strict and carries no verifier metrics", () => {
+  const projection = rawProjection({ category: "grid" }) as any;
+  projection.categoryEvidence.metric = { spotTick: 1 };
+  assert.throws(
+    () =>
+      testMarketplace.ingress.capture(
+        projection as DisplaySafeQuoteProjectionPayload,
+      ),
+    hasErrorCode("TRUSTED_PROJECTION_INVALID"),
+  );
+});
+
+test("category adapter artifacts cannot enter Core's unsupported evidence path", () => {
+  const projection = rawProjection({ category: "health" }) as any;
+  projection.categoryEvidence = {
+    category: "health",
+    observedAt: 1_100,
+    schema: "mandatex.category.venus-health-evidence.v1",
+    subject: {
+      accountAddress: "0x4444444444444444444444444444444444444444",
+      borrowMarketAddress: "0x5555555555555555555555555555555555555555",
+    },
+    metric: {
+      borrowBalanceStored: "4200000000000000000000",
+      liquidityUsdScaled: "5000000000000000000000",
+    },
+    evidenceSha256: "33".repeat(32),
+  };
+  assert.throws(
+    () =>
+      testMarketplace.ingress.capture(
+        projection as DisplaySafeQuoteProjectionPayload,
+      ),
+    hasErrorCode("TRUSTED_PROJECTION_INVALID"),
+  );
+});
+
+test("the closed category policy and adapter registries are exhaustive and frozen", () => {
   assert.deepEqual(Object.keys(CATEGORY_POLICIES).sort(), [
     "grid",
     "health",
@@ -210,11 +260,28 @@ test("the closed category policy table is exhaustive and recursively frozen", ()
     assert.equal(Object.isFrozen(policy), true);
     assert.equal(Object.isFrozen(policy.receiptAdapter), true);
   }
+  assert.deepEqual(Object.keys(CATEGORY_ADAPTER_REGISTRY), [
+    "pancakeswap-v3-grid-v1",
+    "erc4626-yield-v1",
+    "aave-v3-health-v1",
+    "venus-health-v1",
+  ]);
+  assert.equal(Object.isFrozen(CATEGORY_ADAPTER_REGISTRY), true);
+  for (const entry of Object.values(CATEGORY_ADAPTER_REGISTRY)) {
+    assert.equal(Object.isFrozen(entry), true);
+  }
+  assert.equal(Object.isFrozen(MARKETPLACE_HEALTH_ADAPTERS), true);
   const mutable = CATEGORY_POLICIES as unknown as {
     grid: { receiptAdapter: { code: string } };
   };
   assert.throws(() => {
     mutable.grid.receiptAdapter.code = "CATEGORY_YIELD_UNSUPPORTED";
+  }, TypeError);
+  const mutableRegistry = CATEGORY_ADAPTER_REGISTRY as unknown as {
+    "pancakeswap-v3-grid-v1": { category: string };
+  };
+  assert.throws(() => {
+    mutableRegistry["pancakeswap-v3-grid-v1"].category = "yield";
   }, TypeError);
 });
 

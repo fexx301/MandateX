@@ -17,12 +17,17 @@ import {
   marketplaceVerifierPolicyV2Manifest,
   marketplaceVerifierPolicyV2Sha256,
 } from "../src/index.js";
+import { createPrivateMarketplaceCategorySuccessorVerifierRuntime } from "../src/category-runtime.js";
+import { marketplaceCategorySuccessorPolicySha256 } from "../src/category-verifier-policy.js";
+import * as publicServiceApi from "../src/index.js";
 import { MarketplaceServiceError } from "../src/errors.js";
 import {
   CATEGORY_ACCOUNT,
   CATEGORY_BORROW_MARKET,
   CATEGORY_COMPTROLLER,
   categoryDeployment,
+  categorySuccessorDeployment,
+  categorySuccessorQuotePolicy,
 } from "./category-fixture.js";
 
 const POLICY_IDENTITY = Object.freeze({
@@ -31,6 +36,67 @@ const POLICY_IDENTITY = Object.freeze({
 });
 const ANCHOR_HASH = `0x${"c".repeat(64)}`;
 const EVALUATED_AT = 1_725_000_000;
+
+test("the public service API exposes only the signer-free category boundary", () => {
+  assert.equal(
+    "createMarketplaceCategoryAttestationRuntime" in publicServiceApi,
+    false,
+  );
+  assert.equal(
+    "createPrivateMarketplaceCategorySuccessorVerifierRuntime" in publicServiceApi,
+    false,
+  );
+});
+
+test("successor runtime derives execution and infrastructure only from its static policy", () => {
+  const deployment = categorySuccessorDeployment();
+  const policyIdentity = {
+    ...POLICY_IDENTITY,
+    categorySuccessorDeployment: deployment,
+    quotePolicy: categorySuccessorQuotePolicy(),
+  };
+  const verifierPolicySha256 =
+    marketplaceCategorySuccessorPolicySha256(policyIdentity);
+  const runtime = createPrivateMarketplaceCategorySuccessorVerifierRuntime({
+    policyIdentity,
+    verifierPolicySha256,
+    transport: categoryTransport([]),
+    clock: () => EVALUATED_AT,
+    randomUUID: () => "successor-runtime-rpc-id",
+  });
+
+  assert.equal(
+    runtime.policy.schema,
+    "mandatex.marketplace.category-successor-policy.v1",
+  );
+  assert.equal(runtime.policySha256, verifierPolicySha256);
+  assert.equal(
+    runtime.deploymentSha256,
+    runtime.policy.categoryPolicy.deploymentSha256,
+  );
+  assert.deepEqual(runtime.infrastructure, deployment.infrastructure);
+  assert.equal(
+    runtime.policy.categoryPolicy.deployment.adapters.every(
+      (entry) => !Object.hasOwn(entry, "configuration"),
+    ),
+    true,
+  );
+
+  assert.throws(
+    () =>
+      createPrivateMarketplaceCategorySuccessorVerifierRuntime({
+        policyIdentity,
+        verifierPolicySha256,
+        transport: categoryTransport([]),
+        clock: () => EVALUATED_AT,
+        randomUUID: () => "successor-runtime-rpc-id",
+        deployment: categoryDeployment(),
+      } as never),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError &&
+      error.code === "VERIFIER_CONFIGURATION_INVALID",
+  );
+});
 
 test("the signer-free runtime completes the default three-read Venus path", async () => {
   const deployment = categoryDeployment();
@@ -159,6 +225,40 @@ test("category runtime seals fail and unknown adapter outcomes without signing t
   }
 });
 
+test("bound category runtime snapshots request context before adapter I/O", async () => {
+  const deployment = categoryDeployment();
+  const context = {
+    mandate: { mandateId: "mandate-before-io", category: "health" },
+    candidate: { chainId: 56, tokenId: "candidate-before-io" },
+  };
+  const originalContext = structuredClone(context);
+  const baseTransport = categoryTransport([]);
+  let firstRpc = true;
+  const runtime = createRuntime(deployment, {
+    async request(route) {
+      if (firstRpc) {
+        firstRpc = false;
+        context.mandate.mandateId = "mutated-after-io";
+        context.candidate.tokenId = "mutated-after-io";
+      }
+      return baseTransport.request(route);
+    },
+  });
+
+  const result = await runtime.evaluateCategoryBound(
+    { category: "health" },
+    context,
+  );
+  assert.equal(result.outcome, "executed", JSON.stringify(result));
+  if (result.outcome !== "executed") return;
+  assert.equal(result.artifact.result.status, "pass");
+
+  const assertBound: typeof runtime.assertCategoryExecutionBound =
+    runtime.assertCategoryExecutionBound;
+  assertBound(result, originalContext);
+  assert.throws(() => assertBound(result, context));
+});
+
 test("category runtime fails closed before anchoring, on reorg, and on policy mismatch", async () => {
   const deployment = categoryDeployment();
   const wrongChain = createRuntime(
@@ -201,6 +301,24 @@ test("category runtime fails closed before anchoring, on reorg, and on policy mi
     (error: unknown) =>
       error instanceof MarketplaceServiceError &&
       error.code === "VERIFIER_CONFIGURATION_INVALID",
+  );
+});
+
+test("category input rejects an explicitly undefined adapter ID", async () => {
+  const deployment = categoryDeployment();
+  const runtime = createRuntime(deployment, categoryTransport([]));
+  await assert.rejects(
+    runtime.evaluateCategory({ category: "health", adapterId: undefined } as never),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError && error.code === "REQUEST_INVALID",
+  );
+  await assert.rejects(
+    runtime.evaluateCategoryBound(
+      { category: "health", adapterId: undefined } as never,
+      { mandate: { mandateId: "m", category: "health" }, candidate: { chainId: 56, tokenId: "c" } },
+    ),
+    (error: unknown) =>
+      error instanceof MarketplaceServiceError && error.code === "REQUEST_INVALID",
   );
 });
 

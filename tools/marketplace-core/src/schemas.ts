@@ -586,17 +586,15 @@ export const marketplaceQuoteSchema = z
           path: ["normalization"],
           message: "grid, yield, and health quotes are explicitly unsupported",
         });
-      } else {
-        if (
-          categoryPolicy.receiptAdapter.status !== "unsupported" ||
-          quote.normalization.code !== categoryPolicy.receiptAdapter.code
-        ) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["normalization", "code"],
-            message: "unsupported code must match the quote category",
-          });
-        }
+      } else if (
+        categoryPolicy.receiptAdapter.status !== "unsupported" ||
+        quote.normalization.code !== categoryPolicy.receiptAdapter.code
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["normalization", "code"],
+          message: "unsupported code must match the quote category",
+        });
       }
     }
   });

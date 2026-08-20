@@ -62,6 +62,41 @@ the separate reservation and replay-claiming activation path.
 The exact deployment and wire contract is frozen in
 `EVALUATION_ATTESTATION_V2.md`.
 
+## Experimental category-condition boundary
+
+Core also exposes a separate, staged category-condition verifier for the four
+registered grid, yield, Aave-health, and Venus-health adapter identities. This
+contract is not part of quote normalization or marketplace eligibility. Its
+receipt means only that a pinned verifier signed a `pass` commitment for the
+exact request, candidate identifier, adapter, subject, policy, deployment, and
+evidence/artifact hashes. Core cannot recompute the adapter metric from those
+hashes, prove that the subject belongs to the candidate, or infer hireability,
+ranking, reservation, ownership, permissions, or activation authority.
+
+The receipt is explicitly `evaluation_only`, with
+`activationAuthorization: none`, `reservation: none`, and
+`evidenceMode: verifier_commitment_only`. `expiresAt` records the signed
+attestation expiry. `validUntil` is the earlier exclusive boundary at which
+either the attestation expires or the evidence first becomes stale. Stored
+receipts are historical records, not reusable authorization: every current use
+must submit the original signed wire and request to a newly clocked Core
+evaluation. The private issuer remains unexported and undeployed, and ordinary
+Marketplace Core continues to report grid, yield, and health as unsupported.
+
+The proposed successor contract and its production activation gates are recorded
+in `CATEGORY_PRODUCTION_ACTIVATION.md`. That proposal is not frozen and does not
+enable category support.
+
+The successor trust path uses a separate root-authenticated bundle and durable
+CAS state. The static successor deployment records only the root key ID and
+SPKI fingerprint; the public key is supplied through a factory-created internal
+trust controller, not through the marketplace app or a serialized deployment
+manifest. The service-side private orchestrator checks that branded controller
+identity against the static policy before it can commit trust state or request
+an issuance permit. This is a conditional custody boundary, not a production
+root pin: the successor policy digest remains unfrozen and the issuer remains
+outside the public Core/service APIs.
+
 ## Deprecated v1 trust boundary
 
 The process-local v1 API remains available as `createMarketplaceCore` and the

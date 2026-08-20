@@ -27,13 +27,40 @@ This package does not authorize activation, reserve replay markers, fund tasks,
 broadcast transactions, or hold wallet authority.
 
 `createMarketplaceCategoryVerifierRuntime()` is a separate signer-free boundary
-whose only operation is `evaluateCategory()`. Construction binds a strict
+whose only operation is category evaluation. Construction binds a strict
 four-adapter deployment into verifier policy v2, then cross-checks the service
-and verifier deployment digests. Each call selects the one enabled adapter for
-the requested category, executes its exact bounded BSC read contract, recomputes
-the evidence and artifact hashes, and returns only a result carrying trusted
-in-process provenance. This runtime exposes no private key, attestation issuer,
-wire envelope, or generic signing method.
+and verifier deployment digests. A call may select an adapter explicitly with
+its registered `adapterId`; when the ID is omitted, exactly one enabled adapter
+for the requested category is selected. Multiple enabled adapters fail closed
+with `CATEGORY_ADAPTER_SELECTION_REQUIRED`. The selection rule is itself
+versioned in the v2 policy profile, so changing it changes the policy hash.
+Each accepted selection executes its exact bounded BSC read contract,
+recomputes the evidence and artifact hashes, and returns only a result carrying
+trusted in-process provenance. This runtime exposes no private key, attestation
+issuer, wire envelope, or generic signing method.
+
+The successor contract is a separate private/non-production composition path.
+`marketplaceCategorySuccessorPolicyManifest()` binds a static deployment with
+four adapter IDs, explicit infrastructure roots, and a `trustRoot` identity
+(root key ID plus SPKI fingerprint). The private runtime derives its executor
+and provenance roots from that manifest; callers cannot supply a second
+deployment or root override. The actual root public key stays in the
+factory-created Core trust controller, and the private orchestrator rejects a
+controller whose factory identity does not match the static policy before it
+can commit trust state or reserve an issuance. This check is conditional on
+the separately pinned successor-policy identity: the policy digest remains
+unfrozen, the issuer is unexported, and transactional issuance is disabled.
+
+An experimental category-condition issuer exists only as an unexported internal
+module for contract testing. It accepts no caller-supplied artifact or display
+projection, requires the factory-branded bound verifier result, and signs only a
+`pass`. Executed `fail` or `unknown` outcomes fail closed; runtime
+`inconclusive` outcomes return `not_attested`, and no non-pass path reaches UUID
+generation or signing. The resulting condition receipt is not marketplace
+eligibility: it proves a pinned-verifier commitment, not the metric itself,
+candidate-to-subject ownership, mandate permission coverage, hireability,
+ranking, reservation, or activation. It must remain unexported, undeployed, and
+outside API/UI integration while Core category support is disabled.
 
 The pinned verifier-policy hash is a versioned Marketplace Core canonical hash
 of the passive policy fingerprint, the complete quote-trust-file digest, the
@@ -52,6 +79,12 @@ the unchanged v1 manifest together with the category execution contracts,
 transport limits, block-pinning profile, allowed selectors, and category
 deployment digest.
 
+The successor deployment intentionally omits per-request adapter
+`configuration`; subjects, targets, and thresholds belong to the signed
+mandate. Its separate static hash covers the registry, read descriptors,
+infrastructure roots, and trust-root identity. This does not change the locked
+legacy v1 digest.
+
 `parseMarketplaceCategoryAdapterDeploymentManifest()` validates and freezes a
 strict v2 manifest, while `marketplaceCategoryAdapterDeploymentSha256()` hashes
 the normalized addresses, thresholds, adapter and evidence identifiers,
@@ -63,11 +96,11 @@ attestation policy, issue category attestations, or make Marketplace Core accept
 category evidence. Those remain separate contracts.
 
 `enabled: false` entries omit configuration and are hashed as disabled; omission
-is never treated as a default. At most one adapter may be enabled for a category
-in this generation because `evaluateCategory()` accepts a category, not a
-caller-selected adapter ID. The execution artifact binds the chosen adapter ID,
-but deployment policy owns that choice. Aave and Venus therefore cannot be
-enabled together in one deployment.
+is never treated as a default. The deployment may enable more than one adapter
+for a category, including both Aave and Venus health adapters. Callers must use
+the registered `adapterId` when a category is ambiguous; an omitted ID is only
+valid when the pinned deployment has exactly one enabled adapter for that
+category. The execution artifact always binds the chosen adapter ID.
 Venus requires `comptrollerAddress`, `accountAddress`,
 `borrowMarketAddress`, and `minLiquidityUsdScaled`; there is no absolute-liquidity
 default. The Venus metric metadata explicitly includes the monitored-market

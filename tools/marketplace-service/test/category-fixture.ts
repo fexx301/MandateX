@@ -1,5 +1,6 @@
 import {
   MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+  MARKETPLACE_CATEGORY_SUCCESSOR_DEPLOYMENT_SCHEMA,
   MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
 } from "../src/category-policy.js";
 
@@ -9,6 +10,21 @@ export const CATEGORY_COMPTROLLER =
   "0x5555555555555555555555555555555555555555" as const;
 export const CATEGORY_BORROW_MARKET =
   "0x6666666666666666666666666666666666666666" as const;
+export const CATEGORY_ERC8004_REGISTRY =
+  "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432" as const;
+export const CATEGORY_PANCAKE_FACTORY =
+  "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865" as const;
+export const CATEGORY_QUOTE_ENDPOINT =
+  "https://candidate.example/category-quote" as const;
+export const CATEGORY_QUOTE_VERIFYING_CONTRACT =
+  "0x3333333333333333333333333333333333333333" as const;
+
+export function categorySuccessorQuotePolicy() {
+  return {
+    endpoint: CATEGORY_QUOTE_ENDPOINT,
+    verifyingContract: CATEGORY_QUOTE_VERIFYING_CONTRACT,
+  } as const;
+}
 
 export function categoryDeployment(options: {
   readonly minLiquidityUsdScaled?: string;
@@ -115,5 +131,29 @@ export function categoryDeployment(options: {
         ],
       },
     ],
+  };
+}
+
+export function categorySuccessorDeployment() {
+  const adapters = categoryDeployment().adapters.map((entry) => {
+    const { configuration: _configuration, ...staticEntry } = entry as typeof entry & {
+      readonly configuration?: unknown;
+    };
+    return { ...staticEntry, enabled: true };
+  });
+  return {
+    schema: MARKETPLACE_CATEGORY_SUCCESSOR_DEPLOYMENT_SCHEMA,
+    chainId: 56 as const,
+    trustRoot: {
+      keyId: "successor-root-k1",
+      publicKeyFingerprintSha256: "11".repeat(32),
+    },
+    infrastructure: {
+      erc8004Registry: CATEGORY_ERC8004_REGISTRY,
+      pancakeV3Factory: CATEGORY_PANCAKE_FACTORY,
+      aavePoolAddressesProvider: null,
+      venusComptroller: CATEGORY_COMPTROLLER,
+    },
+    adapters,
   };
 }

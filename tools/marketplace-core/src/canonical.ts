@@ -10,6 +10,14 @@ export type CanonicalJsonValue =
   | CanonicalJsonValue[]
   | { [key: string]: CanonicalJsonValue };
 
+const MAX_ARRAY_INDEX = 4_294_967_294;
+
+function isArrayIndexPropertyName(key: string): boolean {
+  if (!/^(?:0|[1-9][0-9]*)$/.test(key)) return false;
+  const value = Number(key);
+  return Number.isSafeInteger(value) && value <= MAX_ARRAY_INDEX;
+}
+
 function normalizeCanonical(value: unknown, path: string): CanonicalJsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return value;
@@ -31,6 +39,11 @@ function normalizeCanonical(value: unknown, path: string): CanonicalJsonValue {
     const record = value as Record<string, unknown>;
     const output: Record<string, CanonicalJsonValue> = {};
     for (const key of Object.keys(record).sort(compareCanonicalStrings)) {
+      if (isArrayIndexPropertyName(key)) {
+        throw new TypeError(
+          `${path} must not contain ECMAScript array-index property names`,
+        );
+      }
       const entry = record[key];
       if (entry === undefined) throw new TypeError(`${path}.${key} must not be undefined`);
       output[key] = normalizeCanonical(entry, `${path}.${key}`);

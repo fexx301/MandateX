@@ -49,7 +49,15 @@ const blockHashSchema = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 const blockSchema = z.object({
   number: hexQuantitySchema,
   hash: blockHashSchema,
+  timestamp: hexQuantitySchema.optional(),
 });
+const sharedAnchorSchema = z
+  .object({
+    number: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    hash: blockHashSchema.transform((value) => value.toLowerCase()),
+    timestamp: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
 
 export type RpcCallObservation = Readonly<{
   method: AllowedRpcMethod;
@@ -76,6 +84,13 @@ export type Erc8004Snapshot = Readonly<{
   requireCanonical: true;
   attempts: number;
   calls: readonly RpcCallObservation[];
+}>;
+
+/** A verifier-owned canonical block anchor shared with another evidence path. */
+export type Erc8004SharedAnchor = Readonly<{
+  readonly number: number;
+  readonly hash: string;
+  readonly timestamp: number;
 }>;
 
 export type Erc8004Result =
@@ -122,6 +137,8 @@ export async function verifyErc8004Ownership(options: {
   transport: Pick<PinnedHttpsTransport, "request">;
   chainId: number;
   tokenId: string;
+  registryAddress: string;
+  sharedAnchor?: Erc8004SharedAnchor;
 }): Promise<Erc8004Result> {
   if (options.chainId !== BSC_MAINNET.chainId) {
     return {
@@ -135,6 +152,15 @@ export async function verifyErc8004Ownership(options: {
   if (!/^\d+$/.test(options.tokenId)) {
     throw new TypeError("tokenId must be an unsigned decimal string");
   }
+  const registryAddressInput = options.registryAddress;
+  if (!isAddress(registryAddressInput)) {
+    throw new TypeError("registryAddress must be an EVM address");
+  }
+  const registryAddress = registryAddressInput.toLowerCase();
+  const sharedAnchor =
+    options.sharedAnchor === undefined
+      ? undefined
+      : sharedAnchorSchema.parse(options.sharedAnchor);
 
   let tokenId: bigint;
   try {
@@ -156,6 +182,8 @@ export async function verifyErc8004Ownership(options: {
         tokenId,
         attempt,
         attemptCalls,
+        registryAddress,
+        sharedAnchor,
       );
       allCalls.push(...attemptCalls);
       return {
@@ -199,6 +227,8 @@ async function readSnapshot(
   tokenId: bigint,
   attempt: number,
   calls: RpcCallObservation[],
+  registryAddress: string,
+  sharedAnchor?: Erc8004SharedAnchor,
 ): Promise<Omit<Erc8004Snapshot, "calls">> {
   let nextId = attempt * 100;
   const rpc = async <T>(
@@ -214,12 +244,17 @@ async function readSnapshot(
     throw new RpcFault("invalid", "CHAIN_ID_MISMATCH");
   }
 
-  const headHex = await rpc<string>("eth_blockNumber", []);
-  const head = parseQuantity(headHex);
-  if (head < BigInt(BSC_MAINNET.confirmationDepth)) {
-    throw new RpcFault("invalid", "HEAD_TOO_LOW");
+  const head = await readCanonicalHead(rpc);
+  const target = sharedAnchor
+    ? BigInt(sharedAnchor.number)
+    : head - BigInt(BSC_MAINNET.confirmationDepth);
+  if (
+    sharedAnchor !== undefined &&
+    (target < 0n ||
+      head < target + BigInt(BSC_MAINNET.confirmationDepth))
+  ) {
+    throw new RpcFault("invalid", "SNAPSHOT_INCONSISTENT");
   }
-  const target = head - BigInt(BSC_MAINNET.confirmationDepth);
   const targetHex = toQuantity(target);
 
   const initialBlockRaw = await rpc<unknown>("eth_getBlockByNumber", [
@@ -227,13 +262,22 @@ async function readSnapshot(
     false,
   ]);
   const initialBlock = parseBlock(initialBlockRaw, target);
+  if (
+    sharedAnchor !== undefined &&
+    (initialBlock.hash.toLowerCase() !== sharedAnchor.hash.toLowerCase() ||
+      initialBlock.timestamp === undefined ||
+      parseQuantity(initialBlock.timestamp) !== BigInt(sharedAnchor.timestamp) ||
+      false)
+  ) {
+    throw new RpcFault("propagation");
+  }
   const blockSelector = {
     blockHash: initialBlock.hash,
     requireCanonical: true,
   } as const;
 
   const registryCode = await rpc<string>("eth_getCode", [
-    BSC_MAINNET.registryAddress,
+    registryAddress,
     blockSelector,
   ]);
   if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(registryCode) || registryCode === "0x") {
@@ -246,7 +290,7 @@ async function readSnapshot(
     args: [tokenId],
   });
   const ownerResult = await rpc<Hex>("eth_call", [
-    { to: BSC_MAINNET.registryAddress, data: ownerData },
+    { to: registryAddress, data: ownerData },
     blockSelector,
   ]);
 
@@ -269,7 +313,12 @@ async function readSnapshot(
     false,
   ]);
   const finalBlock = parseBlock(finalBlockRaw, target);
-  if (finalBlock.hash.toLowerCase() !== initialBlock.hash.toLowerCase()) {
+  if (
+    finalBlock.hash.toLowerCase() !== initialBlock.hash.toLowerCase() ||
+    (sharedAnchor !== undefined &&
+      (finalBlock.timestamp === undefined ||
+        parseQuantity(finalBlock.timestamp) !== BigInt(sharedAnchor.timestamp)))
+  ) {
     throw new RpcFault("propagation");
   }
 
@@ -277,8 +326,8 @@ async function readSnapshot(
   return {
     chainId: 56,
     rpcOrigin: BSC_MAINNET.rpcOrigin,
-    registryAddress: BSC_MAINNET.registryAddress.toLowerCase(),
-    registryDeploymentSource: BSC_MAINNET.registryDeploymentSource,
+    registryAddress,
+    registryDeploymentSource: "explicit verifier configuration",
     registryCodeSha256: createHash("sha256").update(codeBytes).digest("hex"),
     registryCodeBytes: codeBytes.byteLength,
     tokenId: tokenIdText,
@@ -290,6 +339,17 @@ async function readSnapshot(
     requireCanonical: true,
     attempts: attempt,
   };
+}
+
+async function readCanonicalHead(
+  rpc: <T>(method: AllowedRpcMethod, params: readonly unknown[]) => Promise<T>,
+): Promise<bigint> {
+  const headHex = await rpc<string>("eth_blockNumber", []);
+  const head = parseQuantity(headHex);
+  if (head < BigInt(BSC_MAINNET.confirmationDepth)) {
+    throw new RpcFault("invalid", "HEAD_TOO_LOW");
+  }
+  return head;
 }
 
 async function rpcCall<T>(
@@ -350,13 +410,18 @@ async function rpcCall<T>(
 function parseBlock(value: unknown, expectedNumber: bigint): {
   number: string;
   hash: string;
+  timestamp: string | undefined;
 } {
   const parsed = blockSchema.safeParse(value);
   if (!parsed.success) throw new RpcFault("propagation");
   if (parseQuantity(parsed.data.number) !== expectedNumber) {
     throw new RpcFault("propagation");
   }
-  return parsed.data;
+  return {
+    number: parsed.data.number,
+    hash: parsed.data.hash,
+    timestamp: parsed.data.timestamp,
+  };
 }
 
 function parseQuantity(value: unknown): bigint {

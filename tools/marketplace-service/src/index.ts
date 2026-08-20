@@ -13,12 +13,20 @@ export {
   MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
   MARKETPLACE_CATEGORY_ADAPTER_IDS,
   MARKETPLACE_CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  MARKETPLACE_CATEGORY_SUCCESSOR_DEPLOYMENT_SCHEMA,
   marketplaceCategoryAdapterDeploymentEntrySchema,
   marketplaceCategoryAdapterDeploymentManifestSchema,
   marketplaceCategoryAdapterDeploymentSha256,
+  marketplaceCategorySuccessorDeploymentEntrySchema,
+  marketplaceCategorySuccessorDeploymentManifestSchema,
+  marketplaceCategorySuccessorDeploymentSha256,
   parseMarketplaceCategoryAdapterDeploymentManifest,
+  parseMarketplaceCategorySuccessorDeploymentManifest,
   type MarketplaceCategoryAdapterDeploymentEntry,
   type MarketplaceCategoryAdapterDeploymentManifest,
+  type MarketplaceCategorySuccessorDeploymentEntry,
+  type MarketplaceCategorySuccessorDeploymentManifest,
+  type MarketplaceCategorySuccessorTrustRoot,
 } from "./category-policy.js";
 export {
   createMarketplaceVerifierRuntime,
@@ -33,10 +41,16 @@ export {
 export {
   MARKETPLACE_VERIFIER_POLICY_V2_PROFILES,
   MARKETPLACE_VERIFIER_POLICY_V2_SCHEMA,
+  MARKETPLACE_CATEGORY_SUCCESSOR_POLICY_PROFILES,
   marketplaceVerifierPolicyV2Manifest,
   marketplaceVerifierPolicyV2Sha256,
+  marketplaceCategorySuccessorPolicyManifest,
+  marketplaceCategorySuccessorPolicySha256,
   type MarketplaceVerifierPolicyV2Identity,
   type MarketplaceVerifierPolicyV2Manifest,
+  type MarketplaceCategoryProvenanceRoots,
+  type MarketplaceCategorySuccessorPolicyIdentity,
+  type MarketplaceCategorySuccessorPolicyManifest,
 } from "./category-verifier-policy.js";
 export {
   createMarketplaceCategoryVerifierRuntime,

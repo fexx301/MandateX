@@ -18,6 +18,67 @@ import type { CategoryReadAttempt } from "./schema.js";
 const BSC_CHAIN_ID = 56;
 export const CATEGORY_CONFIRMATION_DEPTH = 2 as const;
 
+export type CategorySnapshot = Readonly<{
+  chainId: 56;
+  anchor: BlockAnchor;
+  confirmationDepth: typeof CATEGORY_CONFIRMATION_DEPTH;
+}>;
+
+declare const categorySnapshotHandleBrand: unique symbol;
+
+/**
+ * An opaque, verifier-owned snapshot handle.  The block anchor is deliberately
+ * not part of this public shape; consumers must present the handle back to the
+ * originating capability for every read.
+ */
+export type CategorySnapshotHandle = Readonly<{
+  readonly [categorySnapshotHandleBrand]: true;
+}>;
+
+export interface CategorySnapshotCapability {
+  readonly withSnapshot: <Result>(
+    operation: (snapshot: CategorySnapshot) => Promise<Result>,
+    anchor?: BlockAnchor,
+  ) => Promise<Result>;
+  readonly assertActive: (value: unknown) => asserts value is CategorySnapshot;
+  /** Capture one opaque snapshot for a multi-capability evaluation. */
+  readonly withOpaqueSnapshot: <Result>(
+    operation: (snapshot: CategorySnapshotHandle) => Promise<Result>,
+  ) => Promise<Result>;
+  /** Run a consumer against an already-active opaque snapshot. */
+  readonly withActiveSnapshot: <Result>(
+    snapshot: CategorySnapshotHandle,
+    operation: (snapshot: CategorySnapshotHandle) => Promise<Result>,
+  ) => Promise<Result>;
+  readonly assertOpaqueActive: (
+    value: unknown,
+  ) => asserts value is CategorySnapshotHandle;
+  readonly anchorForOpaque: (value: CategorySnapshotHandle) => BlockAnchor;
+  readonly assertOpaqueCanonical: (
+    value: CategorySnapshotHandle,
+  ) => Promise<void>;
+  /**
+   * Perform the terminal canonicality fence and execute a durable commit while
+   * the caller's surrounding authorization/revision lock is still held.
+   * Successful finalization suppresses the wrapper's redundant trailing fence.
+   */
+  readonly finalizeOpaqueSnapshot: <Result>(
+    value: CategorySnapshotHandle,
+    commit: () => Promise<Result>,
+  ) => Promise<Result>;
+  readonly createReader: (
+    value: CategorySnapshot | CategorySnapshotHandle,
+    expectedReads: readonly ExpectedCategoryRead[],
+  ) => Promise<TransportPinnedCategoryReader>;
+}
+
+const activeSnapshots = new WeakMap<object, CategorySnapshotCapability>();
+const activeOpaqueSnapshots = new WeakMap<
+  object,
+  Readonly<{ capability: CategorySnapshotCapability; anchor: BlockAnchor }>
+>();
+const finalizedOpaqueSnapshots = new WeakSet<object>();
+
 export type ExpectedCategoryRead = Readonly<{
   label: string;
   to: string;
@@ -43,6 +104,225 @@ export class CategoryReadContractError extends Error {
     super("the category adapter violated its manifest-derived read contract");
     this.name = "CategoryReadContractError";
   }
+}
+
+/**
+ * Pins one confirmed BSC block for all category evidence producers. The
+ * returned object is capability-branded; consumers must use the same factory
+ * instance to prove that its anchor was established by the verifier.
+ */
+export function createCategorySnapshotCapability(options: {
+  readonly transport: Pick<PinnedHttpsTransport, "request">;
+  readonly randomUUID: () => string;
+}): CategorySnapshotCapability {
+  if (
+    options === null ||
+    typeof options !== "object" ||
+    typeof options.transport?.request !== "function" ||
+    typeof options.randomUUID !== "function"
+  ) {
+    throw new CategoryReadContractError();
+  }
+  const transport = options.transport;
+  const randomUUID = options.randomUUID;
+  let capability: CategorySnapshotCapability;
+  const assertOpaqueActive: CategorySnapshotCapability["assertOpaqueActive"] = (
+    value: unknown,
+  ): asserts value is CategorySnapshotHandle => {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      activeOpaqueSnapshots.get(value)?.capability !== capability ||
+      finalizedOpaqueSnapshots.has(value)
+    ) {
+      throw new CategoryReadContractError();
+    }
+  };
+  const anchorForOpaque: CategorySnapshotCapability["anchorForOpaque"] = (value) => {
+    assertOpaqueActive(value);
+    const entry = activeOpaqueSnapshots.get(value);
+    if (entry === undefined) throw new CategoryReadContractError();
+    return Object.freeze({ ...entry.anchor });
+  };
+  const assertOpaqueCanonical = async (
+    value: CategorySnapshotHandle,
+  ): Promise<void> => {
+    const anchor = anchorForOpaque(value);
+    if (finalizedOpaqueSnapshots.has(value)) {
+      throw new CategoryReadContractError();
+    }
+    try {
+      const observed = await readBlockHeader(
+        transport,
+        randomUUID,
+        anchor.number,
+      );
+      if (
+        observed.number !== anchor.number ||
+        observed.hash !== anchor.hash ||
+        observed.timestamp !== anchor.timestamp
+      ) {
+        throw new CategoryBlockCanonicalityError();
+      }
+    } catch (cause) {
+      if (cause instanceof CategoryBlockCanonicalityError) throw cause;
+      if (isTransportPolicyViolation(cause)) {
+        throw new CategoryReadContractError();
+      }
+      throw new CategoryBlockCanonicalityError();
+    }
+  };
+  const withActiveSnapshot = async <Result>(
+    snapshot: CategorySnapshotHandle,
+    operation: (snapshot: CategorySnapshotHandle) => Promise<Result>,
+  ): Promise<Result> => {
+    assertOpaqueActive(snapshot);
+    if (typeof operation !== "function") throw new CategoryReadContractError();
+    return operation(snapshot);
+  };
+  const withOpaqueSnapshot = async <Result>(
+    operation: (snapshot: CategorySnapshotHandle) => Promise<Result>,
+  ): Promise<Result> => {
+    if (typeof operation !== "function") throw new CategoryReadContractError();
+    const anchor = await pinCategoryBlock(transport, randomUUID);
+    const snapshot = Object.freeze({}) as CategorySnapshotHandle;
+    activeOpaqueSnapshots.set(
+      snapshot,
+      Object.freeze({ capability: capability!, anchor: Object.freeze({ ...anchor }) }),
+    );
+    try {
+      const result = await operation(snapshot);
+      if (!finalizedOpaqueSnapshots.has(snapshot)) {
+        await assertOpaqueCanonical(snapshot);
+      }
+      return result;
+    } catch (cause) {
+      if (cause instanceof CategoryBlockCanonicalityError) throw cause;
+      if (isTransportPolicyViolation(cause)) throw new CategoryReadContractError();
+      throw cause;
+    } finally {
+      finalizedOpaqueSnapshots.delete(snapshot);
+      activeOpaqueSnapshots.delete(snapshot);
+    }
+  };
+  const finalizeOpaqueSnapshot = async <Result>(
+    value: CategorySnapshotHandle,
+    commit: () => Promise<Result>,
+  ): Promise<Result> => {
+    assertOpaqueActive(value);
+    if (typeof commit !== "function") {
+      throw new CategoryReadContractError();
+    }
+    if (finalizedOpaqueSnapshots.has(value)) {
+      throw new CategoryReadContractError();
+    }
+    await assertOpaqueCanonical(value);
+    // Mark the handle before invoking the external commit. A commit may write
+    // durably and then lose its response; the wrapper must never run another
+    // canonicality check or attempt a compensating release in that ambiguity.
+    finalizedOpaqueSnapshots.add(value);
+    const result = await commit();
+    return result;
+  };
+  capability = Object.freeze({
+    async withSnapshot<Result>(
+      operation: (snapshot: CategorySnapshot) => Promise<Result>,
+      suppliedAnchor?: BlockAnchor,
+    ): Promise<Result> {
+      if (typeof operation !== "function") {
+        throw new CategoryReadContractError();
+      }
+      const anchor =
+        suppliedAnchor === undefined
+          ? await pinCategoryBlock(transport, randomUUID)
+          : await validateSuppliedAnchor(transport, randomUUID, suppliedAnchor);
+      const snapshot = Object.freeze({
+        chainId: 56 as const,
+        anchor: Object.freeze({ ...anchor }),
+        confirmationDepth: CATEGORY_CONFIRMATION_DEPTH,
+      });
+      activeSnapshots.set(snapshot, capability);
+      try {
+        const result = await operation(snapshot);
+        const observed = await readBlockHeader(
+          transport,
+          randomUUID,
+          snapshot.anchor.number,
+        );
+        if (
+          observed.number !== snapshot.anchor.number ||
+          observed.hash !== snapshot.anchor.hash ||
+          observed.timestamp !== snapshot.anchor.timestamp
+        ) {
+          throw new CategoryBlockCanonicalityError();
+        }
+        return result;
+      } catch (cause) {
+        if (cause instanceof CategoryBlockCanonicalityError) throw cause;
+        if (isTransportPolicyViolation(cause)) {
+          throw new CategoryReadContractError();
+        }
+        throw cause;
+      } finally {
+        activeSnapshots.delete(snapshot);
+      }
+    },
+    withOpaqueSnapshot,
+    withActiveSnapshot,
+    assertOpaqueActive,
+    anchorForOpaque,
+    assertOpaqueCanonical,
+    finalizeOpaqueSnapshot,
+    assertActive(value: unknown): asserts value is CategorySnapshot {
+      if (
+        value === null ||
+        typeof value !== "object" ||
+        activeSnapshots.get(value) !== capability
+      ) {
+        throw new CategoryReadContractError();
+      }
+    },
+    async createReader(
+      value: CategorySnapshot | CategorySnapshotHandle,
+      expectedReads: readonly ExpectedCategoryRead[],
+    ): Promise<TransportPinnedCategoryReader> {
+      let anchor: BlockAnchor;
+      if (activeOpaqueSnapshots.has(value as object)) {
+        anchor = anchorForOpaque(value as CategorySnapshotHandle);
+      } else {
+        capability.assertActive(value as CategorySnapshot);
+        anchor = (value as CategorySnapshot).anchor;
+      }
+      return TransportPinnedCategoryReader.create({
+        transport,
+        randomUUID,
+        anchor,
+        expectedReads,
+      });
+    },
+  });
+  return capability;
+}
+
+/**
+ * Pins a confirmed BSC block for a caller that must coordinate more than one
+ * verifier capability (for example ERC-8004 identity plus category reads).
+ * Every consumer still rechecks this anchor's canonicality before accepting a
+ * result; returning it does not grant RPC access or signing authority.
+ */
+export async function captureCategoryBlockAnchor(options: {
+  readonly transport: Pick<PinnedHttpsTransport, "request">;
+  readonly randomUUID: () => string;
+}): Promise<BlockAnchor> {
+  if (
+    options === null ||
+    typeof options !== "object" ||
+    typeof options.transport?.request !== "function" ||
+    typeof options.randomUUID !== "function"
+  ) {
+    throw new CategoryBlockPinError();
+  }
+  return pinCategoryBlock(options.transport, options.randomUUID);
 }
 
 export class TransportPinnedCategoryReader implements PinnedBlockReader {
@@ -76,6 +356,7 @@ export class TransportPinnedCategoryReader implements PinnedBlockReader {
     transport: Pick<PinnedHttpsTransport, "request">;
     randomUUID: () => string;
     expectedReads: readonly ExpectedCategoryRead[];
+    anchor?: BlockAnchor;
   }): Promise<TransportPinnedCategoryReader> {
     if (
       options === null ||
@@ -91,7 +372,10 @@ export class TransportPinnedCategoryReader implements PinnedBlockReader {
     } catch {
       throw new CategoryReadContractError();
     }
-    const anchor = await pinCategoryBlock(options.transport, options.randomUUID);
+    const anchor =
+      options.anchor === undefined
+        ? await pinCategoryBlock(options.transport, options.randomUUID)
+        : blockAnchorSchema.parse(options.anchor);
     return new TransportPinnedCategoryReader({
       transport: options.transport,
       randomUUID: options.randomUUID,
@@ -296,6 +580,69 @@ async function pinCategoryBlock(
     if (isTransportPolicyViolation(cause)) {
       throw new CategoryReadContractError();
     }
+    throw new CategoryBlockPinError();
+  }
+}
+
+/**
+ * A caller-supplied anchor is only a coordination hint. Re-select the
+ * verifier's current confirmation-depth boundary and re-read its header
+ * before allowing adapter calls to use it. This prevents an arbitrary old
+ * block from being smuggled into the shared-snapshot path.
+ */
+async function validateSuppliedAnchor(
+  transport: Pick<PinnedHttpsTransport, "request">,
+  randomUUID: () => string,
+  supplied: unknown,
+): Promise<BlockAnchor> {
+  const anchor = parseSuppliedAnchor(supplied);
+  try {
+    const chainId = await rpcResult(transport, randomUUID, {
+      purpose: "chain-id",
+      rpcMethod: "eth_chainId",
+      params: [],
+    });
+    if (parseQuantity(chainId) !== BigInt(BSC_CHAIN_ID)) {
+      throw new CategoryBlockPinError();
+    }
+    const head = parseQuantity(
+      await rpcResult(transport, randomUUID, {
+        purpose: "head-block-number",
+        rpcMethod: "eth_blockNumber",
+        params: [],
+      }),
+    );
+    const expected = head - BigInt(CATEGORY_CONFIRMATION_DEPTH);
+    if (expected < 0n || expected !== BigInt(anchor.number)) {
+      throw new CategoryBlockPinError();
+    }
+    const observed = await readBlockHeader(transport, randomUUID, anchor.number);
+    if (
+      observed.hash !== anchor.hash ||
+      observed.timestamp !== anchor.timestamp
+    ) {
+      throw new CategoryBlockCanonicalityError();
+    }
+    return anchor;
+  } catch (cause) {
+    if (
+      cause instanceof CategoryBlockPinError ||
+      cause instanceof CategoryBlockCanonicalityError ||
+      cause instanceof CategoryReadContractError
+    ) {
+      throw cause;
+    }
+    if (isTransportPolicyViolation(cause)) {
+      throw new CategoryReadContractError();
+    }
+    throw new CategoryBlockPinError();
+  }
+}
+
+function parseSuppliedAnchor(value: unknown): BlockAnchor {
+  try {
+    return blockAnchorSchema.parse(value);
+  } catch {
     throw new CategoryBlockPinError();
   }
 }

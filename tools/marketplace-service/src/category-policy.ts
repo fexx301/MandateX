@@ -11,6 +11,9 @@ import { z } from "zod";
 export const MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA =
   "mandatex.marketplace.category-adapter-deployment.v2" as const;
 
+export const MARKETPLACE_CATEGORY_SUCCESSOR_DEPLOYMENT_SCHEMA =
+  "mandatex.marketplace.category-successor-deployment.v1" as const;
+
 export const MARKETPLACE_CATEGORY_ADAPTER_IDS = Object.freeze([
   "aave-v3-health-v1",
   "erc4626-yield-v1",
@@ -142,9 +145,7 @@ const aaveHealthDeploymentSchema = z
       .object({
         poolAddress: evmAddressSchema,
         accountAddress: evmAddressSchema,
-        minHealthFactorScaled: uint256DecimalSchema.default(
-          "1100000000000000000",
-        ),
+        minHealthFactorScaled: uint256DecimalSchema,
       })
       .strict()
       .optional(),
@@ -193,12 +194,33 @@ const venusHealthDeploymentSchema = z
   })
   .strict();
 
+const staticGridDeploymentSchema = gridDeploymentSchema.omit({
+  configuration: true,
+});
+const staticYieldDeploymentSchema = yieldDeploymentSchema.omit({
+  configuration: true,
+});
+const staticAaveHealthDeploymentSchema = aaveHealthDeploymentSchema.omit({
+  configuration: true,
+});
+const staticVenusHealthDeploymentSchema = venusHealthDeploymentSchema.omit({
+  configuration: true,
+});
+
 export const marketplaceCategoryAdapterDeploymentEntrySchema =
   z.discriminatedUnion("adapterId", [
     gridDeploymentSchema,
     yieldDeploymentSchema,
     aaveHealthDeploymentSchema,
     venusHealthDeploymentSchema,
+  ]);
+
+export const marketplaceCategorySuccessorDeploymentEntrySchema =
+  z.discriminatedUnion("adapterId", [
+    staticGridDeploymentSchema,
+    staticYieldDeploymentSchema,
+    staticAaveHealthDeploymentSchema,
+    staticVenusHealthDeploymentSchema,
   ]);
 
 const normalizedCategoryAdapterDeploymentManifestSchema = z
@@ -225,15 +247,14 @@ const normalizedCategoryAdapterDeploymentManifestSchema = z
       });
     }
 
-    const enabledByCategory = new Map<string, number[]>();
     for (const [index, entry] of manifest.adapters.entries()) {
       const hasConfiguration = Object.hasOwn(entry, "configuration");
-      if (entry.enabled !== hasConfiguration) {
+      if (!entry.enabled && hasConfiguration) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["adapters", index, "configuration"],
           message:
-            "enabled adapter entries require configuration and disabled entries must omit it",
+            "disabled adapter entries must omit configuration",
         });
       }
       if (hasConfiguration && entry.configuration === undefined) {
@@ -243,28 +264,65 @@ const normalizedCategoryAdapterDeploymentManifestSchema = z
           message: "configuration must not be explicitly undefined",
         });
       }
-      if (entry.enabled) {
-        const indexes = enabledByCategory.get(entry.category) ?? [];
-        indexes.push(index);
-        enabledByCategory.set(entry.category, indexes);
-      }
-    }
-
-    for (const [category, indexes] of enabledByCategory) {
-      if (indexes.length > 1) {
-        for (const index of indexes) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["adapters", index, "enabled"],
-            message: `at most one adapter may be enabled for category ${category} until the category request can select an adapter ID`,
-          });
-        }
-      }
     }
   });
 
 export const marketplaceCategoryAdapterDeploymentManifestSchema =
   normalizedCategoryAdapterDeploymentManifestSchema.transform((manifest) => ({
+    ...manifest,
+    adapters: [...manifest.adapters].sort((left, right) =>
+      left.adapterId < right.adapterId ? -1 : left.adapterId > right.adapterId ? 1 : 0,
+    ),
+  }));
+
+const categorySuccessorInfrastructureSchema = z
+  .object({
+    erc8004Registry: evmAddressSchema,
+    pancakeV3Factory: evmAddressSchema,
+    aavePoolAddressesProvider: evmAddressSchema.nullable(),
+    venusComptroller: evmAddressSchema,
+  })
+  .strict();
+
+// The root key itself is supplied through the separately managed trust
+// controller, but its identity is part of the static successor deployment.
+// This prevents an app-controlled controller from silently selecting a
+// different root under an otherwise matching policy and bundle.
+const categorySuccessorTrustRootSchema = z
+  .object({
+    keyId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    publicKeyFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+
+export const marketplaceCategorySuccessorDeploymentManifestSchema = z
+  .object({
+    schema: z.literal(MARKETPLACE_CATEGORY_SUCCESSOR_DEPLOYMENT_SCHEMA),
+    chainId: z.literal(56),
+    trustRoot: categorySuccessorTrustRootSchema,
+    infrastructure: categorySuccessorInfrastructureSchema,
+    adapters: z
+      .array(marketplaceCategorySuccessorDeploymentEntrySchema)
+      .length(MARKETPLACE_CATEGORY_ADAPTER_IDS.length),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    const adapterIds = manifest.adapters.map((entry) => entry.adapterId);
+    const expected = new Set(MARKETPLACE_CATEGORY_ADAPTER_IDS);
+    if (
+      new Set(adapterIds).size !== adapterIds.length ||
+      adapterIds.length !== expected.size ||
+      adapterIds.some((adapterId) => !expected.has(adapterId))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["adapters"],
+        message:
+          "successor deployment must contain exactly one static entry for each registered adapter ID",
+      });
+    }
+  })
+  .transform((manifest) => ({
     ...manifest,
     adapters: [...manifest.adapters].sort((left, right) =>
       left.adapterId < right.adapterId ? -1 : left.adapterId > right.adapterId ? 1 : 0,
@@ -285,6 +343,18 @@ export type MarketplaceCategoryAdapterDeploymentManifest = DeepReadonly<
 
 export type MarketplaceCategoryAdapterDeploymentEntry = DeepReadonly<
   z.infer<typeof marketplaceCategoryAdapterDeploymentEntrySchema>
+>;
+
+export type MarketplaceCategorySuccessorDeploymentManifest = DeepReadonly<
+  z.infer<typeof marketplaceCategorySuccessorDeploymentManifestSchema>
+>;
+
+export type MarketplaceCategorySuccessorTrustRoot = DeepReadonly<
+  z.infer<typeof categorySuccessorTrustRootSchema>
+>;
+
+export type MarketplaceCategorySuccessorDeploymentEntry = DeepReadonly<
+  z.infer<typeof marketplaceCategorySuccessorDeploymentEntrySchema>
 >;
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
@@ -310,4 +380,36 @@ export function parseMarketplaceCategoryAdapterDeploymentManifest(
 /** Hashes the normalized manifest; callers must provide the full four-entry set. */
 export function marketplaceCategoryAdapterDeploymentSha256(value: unknown): string {
   return canonicalSha256(parseMarketplaceCategoryAdapterDeploymentManifest(value));
+}
+
+/** Parse, normalize, detach, and freeze the static successor deployment. */
+export function parseMarketplaceCategorySuccessorDeploymentManifest(
+  value: unknown,
+): MarketplaceCategorySuccessorDeploymentManifest {
+  return deepFreeze(
+    marketplaceCategorySuccessorDeploymentManifestSchema.parse(value),
+  );
+}
+
+export function marketplaceCategorySuccessorDeploymentSha256(
+  value: unknown,
+): string {
+  return canonicalSha256(
+    parseMarketplaceCategorySuccessorDeploymentManifest(value),
+  );
+}
+
+/**
+ * The executor still consumes its legacy static adapter registry shape. This
+ * projection is deterministic and contains no mandate-specific configuration.
+ */
+export function marketplaceCategorySuccessorExecutorDeployment(
+  value: unknown,
+): MarketplaceCategoryAdapterDeploymentManifest {
+  const deployment = parseMarketplaceCategorySuccessorDeploymentManifest(value);
+  return parseMarketplaceCategoryAdapterDeploymentManifest({
+    schema: MARKETPLACE_CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
+    chainId: deployment.chainId,
+    adapters: deployment.adapters,
+  });
 }

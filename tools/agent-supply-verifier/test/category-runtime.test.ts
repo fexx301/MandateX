@@ -26,11 +26,17 @@ import {
 import {
   assertTrustedCategoryExecution,
   assertTrustedCategoryExecutionSuccess,
+  assertBoundCategoryExecutionSuccess,
+  bindTrustedCategoryExecutionSuccess,
+  createCategoryExecutionBindingCapability,
   createCategoryAdapterExecutor,
+  type CategoryAdapterExecutionInput,
+  type CategoryExecutionBindingCapability,
 } from "../src/category/execute.js";
 import {
   CATEGORY_ADAPTER_DEPLOYMENT_SCHEMA,
   CATEGORY_ADAPTER_VALIDATION_PROFILES,
+  parseCategoryAdapterDeploymentManifest,
 } from "../src/category/policy.js";
 import {
   CATEGORY_EXECUTION_ARTIFACT_SCHEMA,
@@ -160,6 +166,207 @@ test("Venus is the enabled health default, performs three exact reads, and accep
     code: "CATEGORY_ADAPTER_NOT_CONFIGURED",
     message: "no adapter is enabled for this category in the pinned deployment",
   });
+});
+
+test("static-only deployment evaluates mandate-owned scope without dynamic configuration", async () => {
+  const deployment = structuredClone(venusDeployment()) as {
+    adapters: Array<{ adapterId: string; configuration?: unknown }>;
+  };
+  for (const entry of deployment.adapters) delete entry.configuration;
+  const executor = createCategoryAdapterExecutor({
+    deployment,
+    verifierPolicySha256: POLICY_SHA256,
+    transport: scenarioTransport("pass", [], new Map()),
+    clock: () => 1_700_000_000,
+    randomUUID: sequentialId(),
+  });
+
+  const scope = {
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+    category: "health",
+    evidenceSchema: VENUS_HEALTH_EVIDENCE_SCHEMA,
+    protocol: "venus",
+    subject: {
+      comptrollerAddress: VENUS_COMPTROLLER,
+      accountAddress: ACCOUNT,
+      borrowMarketAddress: VENUS_MARKET,
+    },
+    conditionPolicy: {
+      unit: "1e18-usd",
+      minLiquidityUsdScaled: "100",
+    },
+  } as const;
+  const result = await executor.evaluateScope(scope);
+  assert.equal(result.outcome, "executed", JSON.stringify(result));
+  if (result.outcome !== "executed") return;
+  assert.equal(result.artifact.result.status, "pass");
+  if (result.artifact.result.status !== "pass") return;
+  assert.equal(result.artifact.result.evidence.schema, VENUS_HEALTH_EVIDENCE_SCHEMA);
+  if (result.artifact.result.evidence.schema !== VENUS_HEALTH_EVIDENCE_SCHEMA) return;
+  assert.equal(result.artifact.result.evidence.subject.accountAddress, ACCOUNT);
+  assert.equal("configuration" in executor.deployment.adapters.find(
+    (entry) => entry.adapterId === VENUS_HEALTH_ADAPTER_ID,
+  )!, false);
+  assert.equal(
+    (await executor.evaluate({ category: "health" })).outcome,
+    "inconclusive",
+  );
+});
+
+test("explicit adapterId selects either enabled health adapter and category-only calls fail closed when ambiguous", async () => {
+  const routes: BscCategoryRpcRoute[] = [];
+  const deployment = deploymentWithBothHealthAdapters();
+  let clockCalls = 0;
+  let uuidCalls = 0;
+  const nextId = sequentialId();
+  const executor = createCategoryAdapterExecutor({
+    deployment,
+    verifierPolicySha256: POLICY_SHA256,
+    transport: mappedStateTransport(
+      new Map([
+        [
+          SELECTOR_GET_USER_ACCOUNT_DATA,
+          returndata(1_000n, 500n, 0n, 0n, 0n, 2_000_000_000_000_000_000n),
+        ],
+        [SELECTOR_GET_ACCOUNT_LIQUIDITY, returndata(0n, 200n, 0n)],
+        [SELECTOR_GET_ASSETS_IN, returndata(32n, 1n, BigInt(ACCOUNT))],
+        [SELECTOR_BORROW_BALANCE_STORED, returndata(50n, 0n, 0n)],
+      ]),
+      routes,
+    ),
+    clock: () => {
+      clockCalls += 1;
+      return 1_700_000_000;
+    },
+    randomUUID: () => {
+      uuidCalls += 1;
+      return nextId();
+    },
+  });
+
+  const aave = await executor.evaluate({
+    category: "health",
+    adapterId: HEALTH_ADAPTER_ID,
+  });
+  assert.equal(aave.outcome, "executed", JSON.stringify(aave));
+  if (aave.outcome !== "executed") return;
+  assert.equal(aave.artifact.adapter.adapterId, HEALTH_ADAPTER_ID);
+  assert.equal(aave.artifact.result.status, "pass");
+  assert.deepEqual(
+    routes
+      .filter(
+        (route): route is Extract<
+          BscCategoryRpcRoute,
+          { purpose: "state-read" }
+        > => route.purpose === "state-read",
+      )
+      .map((route) => ({
+        to: route.approvedTargets[0],
+        data: route.approvedCalldata,
+      })),
+    [
+      {
+        to: AAVE_POOL,
+        data: addressCalldata(SELECTOR_GET_USER_ACCOUNT_DATA, ACCOUNT),
+      },
+    ],
+  );
+
+  routes.length = 0;
+  const venus = await executor.evaluate({
+    category: "health",
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+  });
+  assert.equal(venus.outcome, "executed", JSON.stringify(venus));
+  if (venus.outcome !== "executed") return;
+  assert.equal(venus.artifact.adapter.adapterId, VENUS_HEALTH_ADAPTER_ID);
+  assert.equal(venus.artifact.result.status, "pass");
+  assert.deepEqual(
+    routes
+      .filter(
+        (route): route is Extract<
+          BscCategoryRpcRoute,
+          { purpose: "state-read" }
+        > => route.purpose === "state-read",
+      )
+      .map((route) => ({
+        to: route.approvedTargets[0],
+        data: route.approvedCalldata,
+      })),
+    [
+      {
+        to: VENUS_COMPTROLLER,
+        data: addressCalldata(SELECTOR_GET_ACCOUNT_LIQUIDITY, ACCOUNT),
+      },
+      {
+        to: VENUS_COMPTROLLER,
+        data: addressCalldata(SELECTOR_GET_ASSETS_IN, ACCOUNT),
+      },
+      {
+        to: VENUS_MARKET,
+        data: addressCalldata(SELECTOR_BORROW_BALANCE_STORED, ACCOUNT),
+      },
+    ],
+  );
+
+  const routesBeforeAmbiguity = routes.length;
+  const clockCallsBeforeAmbiguity = clockCalls;
+  const uuidCallsBeforeAmbiguity = uuidCalls;
+  assert.deepEqual(await executor.evaluate({ category: "health" }), {
+    schema: "mandatex.agent-supply.category-execution-result.v1",
+    outcome: "inconclusive",
+    category: "health",
+    code: "CATEGORY_ADAPTER_SELECTION_REQUIRED",
+    message: "multiple adapters are enabled for this category; adapterId is required",
+  });
+  assert.equal(routes.length, routesBeforeAmbiguity);
+  assert.equal(clockCalls, clockCallsBeforeAmbiguity);
+  assert.equal(uuidCalls, uuidCallsBeforeAmbiguity);
+
+  await assert.rejects(
+    executor.evaluate({
+      category: "yield",
+      adapterId: HEALTH_ADAPTER_ID,
+    } as unknown as CategoryAdapterExecutionInput),
+    TypeError,
+  );
+  assert.equal(routes.length, routesBeforeAmbiguity);
+  assert.equal(clockCalls, clockCallsBeforeAmbiguity);
+  assert.equal(uuidCalls, uuidCallsBeforeAmbiguity);
+
+  const disabledRoutes: BscCategoryRpcRoute[] = [];
+  let disabledClockCalls = 0;
+  let disabledUuidCalls = 0;
+  const disabledExecutor = createCategoryAdapterExecutor({
+    deployment: venusDeployment(),
+    verifierPolicySha256: POLICY_SHA256,
+    transport: scenarioTransport("pass", disabledRoutes, new Map()),
+    clock: () => {
+      disabledClockCalls += 1;
+      return 1_700_000_000;
+    },
+    randomUUID: () => {
+      disabledUuidCalls += 1;
+      return "disabled-adapter";
+    },
+  });
+  assert.deepEqual(
+    await disabledExecutor.evaluate({
+      category: "health",
+      adapterId: HEALTH_ADAPTER_ID,
+    }),
+    {
+      schema: "mandatex.agent-supply.category-execution-result.v1",
+      outcome: "inconclusive",
+      category: "health",
+      code: "CATEGORY_ADAPTER_NOT_CONFIGURED",
+      message:
+        "the requested adapter is not enabled for this category in the pinned deployment",
+    },
+  );
+  assert.equal(disabledRoutes.length, 0);
+  assert.equal(disabledClockCalls, 0);
+  assert.equal(disabledUuidCalls, 0);
 });
 
 test("grid, yield, and Aave runtime branches execute their exact pass reads", async () => {
@@ -298,6 +505,48 @@ test("category execution provenance rejects clones, proxies, tampering, and wron
     } as unknown as { category: "health" }),
     TypeError,
   );
+  await assert.rejects(
+    executor.evaluate({
+      category: "health",
+      adapterId: undefined,
+    } as unknown as CategoryAdapterExecutionInput),
+    TypeError,
+  );
+  await assert.rejects(
+    executor.evaluate({
+      category: "health",
+      adapterId: new String(VENUS_HEALTH_ADAPTER_ID),
+    } as unknown as CategoryAdapterExecutionInput),
+    TypeError,
+  );
+  await assert.rejects(
+    executor.evaluate({
+      category: "health",
+      adapterId: "unknown-adapter-v1",
+    } as unknown as CategoryAdapterExecutionInput),
+    TypeError,
+  );
+  const accessorAdapter = { category: "health" as const };
+  Object.defineProperty(accessorAdapter, "adapterId", {
+    enumerable: true,
+    get: () => VENUS_HEALTH_ADAPTER_ID,
+  });
+  await assert.rejects(
+    executor.evaluate(accessorAdapter as CategoryAdapterExecutionInput),
+    TypeError,
+  );
+  const symbolAdapter = {
+    category: "health" as const,
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+  };
+  Object.defineProperty(symbolAdapter, Symbol("unexpected"), {
+    enumerable: true,
+    value: true,
+  });
+  await assert.rejects(
+    executor.evaluate(symbolAdapter as CategoryAdapterExecutionInput),
+    TypeError,
+  );
 
   let categoryReads = 0;
   const changingCategory = new Proxy(
@@ -319,10 +568,252 @@ test("category execution provenance rejects clones, proxies, tampering, and wron
     assert.equal(proxyResult.artifact.adapter.category, "health");
   }
 
+  let adapterReads = 0;
+  const changingAdapter = new Proxy(
+    {
+      category: "health" as const,
+      adapterId: VENUS_HEALTH_ADAPTER_ID,
+    },
+    {
+      get(target, key, receiver) {
+        if (key === "adapterId") {
+          adapterReads += 1;
+          return adapterReads === 1
+            ? VENUS_HEALTH_ADAPTER_ID
+            : HEALTH_ADAPTER_ID;
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    },
+  );
+  const selectedProxyResult = await executor.evaluate(changingAdapter);
+  assert.equal(adapterReads, 0);
+  assert.equal(selectedProxyResult.outcome, "executed");
+  if (selectedProxyResult.outcome === "executed") {
+    assert.equal(
+      selectedProxyResult.artifact.adapter.adapterId,
+      VENUS_HEALTH_ADAPTER_ID,
+    );
+  }
+
   assert.throws(() =>
     Object.assign(result.artifact, {
       artifactSha256: "d".repeat(64),
     }),
+  );
+});
+
+test("trusted pass results bind an explicit adapter and private mandate/candidate context", async () => {
+  const { executor, result } = await evaluateMode("pass");
+  assert.equal(result.outcome, "executed");
+  if (result.outcome !== "executed") return;
+
+  const selection = {
+    category: "health" as const,
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+  };
+  const context = {
+    mandate: {
+      mandateId: "mandate-1",
+      category: "health",
+      policy: { minLiquidityUsdScaled: "100" },
+    },
+    candidate: {
+      chainId: 56,
+      tokenId: "42",
+      owner: ACCOUNT,
+    },
+  };
+
+  const bound = bindTrustedCategoryExecutionSuccess(
+    result,
+    executor,
+    selection,
+    context,
+  );
+  assert.equal(bound, result);
+  assertBoundCategoryExecutionSuccess(result, executor, selection, context);
+
+  assert.throws(() =>
+    assertBoundCategoryExecutionSuccess(
+      result,
+      executor,
+      { category: "health", adapterId: HEALTH_ADAPTER_ID },
+      context,
+    ),
+  );
+  assert.throws(() =>
+    assertBoundCategoryExecutionSuccess(result, executor, selection, {
+      ...context,
+      candidate: { ...context.candidate, tokenId: "43" },
+    }),
+  );
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(result, executor, selection, {
+      ...context,
+      mandate: { ...context.mandate, mandateId: "mandate-2" },
+    }),
+  );
+
+  const requestBound = bindTrustedCategoryExecutionSuccess(
+    result,
+    executor,
+    {
+      selection,
+      mandate: context.mandate,
+      candidate: context.candidate,
+    },
+  );
+  assert.equal(requestBound, result);
+});
+
+test("category binding rejects missing or forged selection/context capabilities", async () => {
+  const { executor, result } = await evaluateMode("pass");
+  assert.equal(result.outcome, "executed");
+  if (result.outcome !== "executed") return;
+
+  const context = {
+    mandate: { mandateId: "mandate-1" },
+    candidate: { chainId: 56, tokenId: "42" },
+  };
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(result, executor, {
+      category: "health",
+    } as never, context),
+  );
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      result,
+      executor,
+      { category: "health", adapterId: VENUS_HEALTH_ADAPTER_ID },
+      {
+        mandate: { mandateId: "mandate-1" },
+        candidate: { chainId: 56, tokenId: "42", extra: undefined },
+      },
+    ),
+  );
+
+  const accessorContext = {
+    mandate: { mandateId: "mandate-1" },
+    candidate: { chainId: 56, tokenId: "42" },
+  } as { mandate: unknown; candidate: unknown };
+  Object.defineProperty(accessorContext, "candidate", {
+    enumerable: true,
+    get: () => ({ chainId: 56, tokenId: "42" }),
+  });
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      result,
+      executor,
+      { category: "health", adapterId: VENUS_HEALTH_ADAPTER_ID },
+      accessorContext,
+    ),
+  );
+
+  const proxyContext = new Proxy(context, {});
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      result,
+      executor,
+      { category: "health", adapterId: VENUS_HEALTH_ADAPTER_ID },
+      proxyContext,
+    ),
+  );
+});
+
+test("category binding accepts only a trusted pass result from the originating executor", async () => {
+  const pass = await evaluateMode("pass");
+  const inconclusive = await evaluateMode("unknown");
+  const selection = {
+    category: "health" as const,
+    adapterId: VENUS_HEALTH_ADAPTER_ID,
+  };
+  const context = {
+    mandate: { mandateId: "mandate-1" },
+    candidate: { chainId: 56, tokenId: "42" },
+  };
+  assert.equal(pass.result.outcome, "executed");
+  if (pass.result.outcome !== "executed") return;
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      structuredClone(pass.result),
+      pass.executor,
+      selection,
+      context,
+    ),
+  );
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      new Proxy(pass.result, {}),
+      pass.executor,
+      selection,
+      context,
+    ),
+  );
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      pass.result,
+      inconclusive.executor,
+      selection,
+      context,
+    ),
+  );
+  assert.throws(() =>
+    bindTrustedCategoryExecutionSuccess(
+      inconclusive.result,
+      inconclusive.executor,
+      selection,
+      context,
+    ),
+  );
+});
+
+test("bound capability snapshots the request before adapter I/O", async () => {
+  const routes: BscCategoryRpcRoute[] = [];
+  const responseBodies = new Map<string, Uint8Array>();
+  const baseTransport = scenarioTransport("pass", routes, responseBodies);
+  let request: {
+    selection: { category: "health"; adapterId: typeof VENUS_HEALTH_ADAPTER_ID };
+    mandate: { mandateId: string };
+    candidate: { chainId: number; tokenId: string };
+  };
+  const executor = createCategoryAdapterExecutor({
+    deployment: venusDeployment(),
+    verifierPolicySha256: POLICY_SHA256,
+    transport: {
+      async request(route) {
+        // Mutate the caller-owned object at the first I/O boundary. A correct
+        // bound evaluator has already captured the original request by then.
+        request.selection.adapterId = HEALTH_ADAPTER_ID as never;
+        request.mandate.mandateId = "mutated-after-snapshot";
+        request.candidate.tokenId = "mutated-after-snapshot";
+        return baseTransport.request(route);
+      },
+    },
+    clock: () => 1_700_000_000,
+    randomUUID: sequentialId(),
+  });
+  const capability: CategoryExecutionBindingCapability =
+    createCategoryExecutionBindingCapability(executor);
+  request = {
+    selection: {
+      category: "health",
+      adapterId: VENUS_HEALTH_ADAPTER_ID,
+    },
+    mandate: { mandateId: "mandate-before-io" },
+    candidate: { chainId: 56, tokenId: "candidate-before-io" },
+  };
+  const originalRequest = structuredClone(request);
+  const result = await capability.evaluateBound(request);
+  assert.equal(result.outcome, "executed");
+  if (result.outcome !== "executed") return;
+  assert.equal(result.artifact.adapter.adapterId, VENUS_HEALTH_ADAPTER_ID);
+
+  capability.assertBound(result, originalRequest);
+  assert.throws(() => capability.assertBound(result, request));
+  assert.equal(
+    routes.filter((route) => route.purpose === "state-read").length,
+    3,
   );
 });
 
@@ -365,6 +856,14 @@ test("artifact schema rejects a cross-adapter result code even when the outer sh
   const parsed = categoryExecutionArtifactSchema.safeParse(tampered);
   assert.equal(parsed.success, false);
   assert.equal(CATEGORY_EXECUTION_ARTIFACT_SCHEMA, "mandatex.agent-supply.category-execution-artifact.v1");
+});
+
+test("Aave deployment policy requires an explicit health-factor threshold", () => {
+  const deployment = deploymentWithEnabledAdapter(HEALTH_ADAPTER_ID, {
+    poolAddress: AAVE_POOL,
+    accountAddress: ACCOUNT,
+  });
+  assert.throws(() => parseCategoryAdapterDeploymentManifest(deployment));
 });
 
 function venusDeployment(): unknown {
@@ -454,6 +953,32 @@ function deploymentWithEnabledAdapter(
   adapterId: string,
   configuration: Readonly<Record<string, unknown>>,
 ): unknown {
+  return deploymentWithEnabledAdapters(
+    new Map([[adapterId, configuration]]),
+  );
+}
+
+function deploymentWithBothHealthAdapters(): unknown {
+  return deploymentWithEnabledAdapters(
+    new Map([
+      [HEALTH_ADAPTER_ID, {
+        poolAddress: AAVE_POOL,
+        accountAddress: ACCOUNT,
+        minHealthFactorScaled: "1100000000000000000",
+      }],
+      [VENUS_HEALTH_ADAPTER_ID, {
+        comptrollerAddress: VENUS_COMPTROLLER,
+        accountAddress: ACCOUNT,
+        borrowMarketAddress: VENUS_MARKET,
+        minLiquidityUsdScaled: "100",
+      }],
+    ]),
+  );
+}
+
+function deploymentWithEnabledAdapters(
+  configurations: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+): unknown {
   const deployment = structuredClone(venusDeployment()) as {
     adapters: Array<{
       adapterId: string;
@@ -462,9 +987,10 @@ function deploymentWithEnabledAdapter(
     }>;
   };
   for (const entry of deployment.adapters) {
-    entry.enabled = entry.adapterId === adapterId;
+    entry.enabled = configurations.has(entry.adapterId);
     delete entry.configuration;
-    if (entry.enabled) entry.configuration = { ...configuration };
+    const configuration = configurations.get(entry.adapterId);
+    if (configuration !== undefined) entry.configuration = { ...configuration };
   }
   return deployment;
 }
