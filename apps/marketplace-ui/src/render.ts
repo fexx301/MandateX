@@ -68,10 +68,10 @@ export function renderMandateForm(input: {
       attestation, then ranks the ones that qualify and states why the rest did not.
     </p>
 
-    ${input.notice === undefined ? null : html`<div class="banner info">${input.notice}</div>`}
+    ${input.notice === undefined ? null : html`<div class="banner info" role="status">${input.notice}</div>`}
     ${(input.problems ?? []).length === 0
       ? null
-      : html`<div class="banner bad">
+      : html`<div class="banner bad" role="alert">
           <strong>The mandate was not submitted as typed.</strong>
           <ul class="plain">
             ${(input.problems ?? []).map((problem) => html`<li>${problem}</li>`)}
@@ -88,7 +88,7 @@ export function renderMandateForm(input: {
           )}
           will be submitted with this mandate.
         </div>`
-      : html`<div class="banner bad">
+      : html`<div class="banner bad" role="alert">
           <strong>No candidate attestations are available.</strong>
           This UI does not mint attestations. It submits ones issued by the verifier.
           The marketplace API at <span class="mono">${input.apiBase}</span> is not serving
@@ -224,13 +224,13 @@ export function renderComparison(input: {
 
     ${(input.problems ?? []).length === 0
       ? null
-      : html`<div class="banner bad">
+      : html`<div class="banner bad" role="alert">
           <ul class="plain">${(input.problems ?? []).map((p) => html`<li>${p}</li>`)}</ul>
         </div>`}
 
     ${view.warnings.length === 0
       ? null
-      : html`<div class="banner bad">
+      : html`<div class="banner bad" role="alert">
           <strong>Integrity notices from the marketplace API.</strong>
           <ul class="plain">${view.warnings.map((w) => html`<li>${w}</li>`)}</ul>
         </div>`}
@@ -278,7 +278,7 @@ function renderMandateBindingNotice(view: ComparisonView): Html {
     String((entry as unknown as Record<string, unknown>).code ?? ""),
   );
   if (!codes.every((code) => code === "ATTESTATION_MANDATE_HASH_MISMATCH")) return raw("");
-  return html`<div class="banner">
+  return html`<div class="banner" role="status">
     <strong>The mandate was edited, so no attestation applies to it.</strong>
     Every candidate failed with <code>ATTESTATION_MANDATE_HASH_MISMATCH</code>: each attestation
     commits to the hash of the exact mandate it was issued for, and this one no longer matches.
@@ -760,7 +760,7 @@ export function renderError(input: {
 }): Html {
   return html`
     <h1>${input.heading}</h1>
-    <div class="banner bad">${input.detail}</div>
+    <div class="banner bad" role="alert">${input.detail}</div>
     <div class="panel soft" style="font-size:13px">
       The marketplace API this interface reads is
       <span class="mono">${input.apiBase}</span>. Nothing was evaluated, and no state
