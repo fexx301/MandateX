@@ -270,6 +270,45 @@ export function createUiRouter(config: UiConfig, client = new MarketplaceApiClie
 
       const form = parseFormBody(body.body);
       const built = buildMandate(fixtures.mandate, form, await loadCategoryOptions());
+
+      // Refuse to evaluate a mandate that is not the one submitted.
+      //
+      // Previously any rejected field was dropped, the mandate was built from the
+      // base value instead, and the comparison ran anyway with a banner explaining
+      // what had been ignored. That shows a user results for a mandate they did not
+      // ask for, which is the same silent substitution the adapters refuse defaults
+      // to avoid: a plausible answer to a different question is worse than no answer.
+      //
+      // So the form comes back with the problems and the offending fields marked,
+      // and nothing is evaluated. 422 rather than 400: the request is well-formed
+      // HTTP, its content is what cannot be processed.
+      //
+      // Note the rejected value itself is not redisplayed -- the field falls back to
+      // the last good value. The value is not lost to the user, because every message
+      // quotes it ("...received \"abc\""), and re-populating an input with a value the
+      // server just refused would need the raw submission threaded through the
+      // renderer for a smaller gain.
+      if (built.problems.length > 0) {
+        sendHtml(
+          response,
+          422,
+          page({
+            title: "Mandate not submitted as typed | MandateX",
+            body: renderMandateForm({
+              categoryOptions: await loadCategoryOptions(),
+              mandate: built.mandate,
+              attestationCount: fixtures.comparisonSet.length,
+              apiBase: config.apiUrl,
+              fixturesAvailable: true,
+              problems: built.problems,
+              invalidFields: built.invalidFields,
+              ...(fixtures.warning === undefined ? {} : { fixtureWarning: fixtures.warning }),
+            }),
+          }),
+        );
+        return;
+      }
+
       const evaluated = await client.evaluate({
         mandate: built.mandate,
         attestations: fixtures.comparisonSet,

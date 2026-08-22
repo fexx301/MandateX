@@ -742,6 +742,73 @@ async function main(): Promise<void> {
     !hostilePage.includes("<script>") && hostilePage.includes("&lt;script&gt;"),
   );
 
+  await withApi(pinnedClock, async (apiBase) => {
+    await withUi(apiBase, async (uiBase) => {
+      heading("Invalid input refuses evaluation instead of substituting a mandate");
+    // A rejected field used to be dropped, the mandate rebuilt from the base value,
+    // and the comparison run anyway. That answers a question the user did not ask.
+    const bad = await postForm(uiBase, "/evaluate", {
+      category: "rebalancing",
+      maxSlippageBps: "abc",
+    });
+
+    check(
+      "an unparseable field returns 422 rather than a comparison",
+      bad.status === 422,
+      `status ${bad.status}`,
+    );
+    check(
+      "the form comes back, not a results page",
+      bad.text.includes("Hire an agent under a mandate") && !bad.text.includes("<h1>Comparison"),
+    );
+    check(
+      "the rejected value is quoted back so it is not lost",
+      /Max slippage must be a whole number, received &quot;abc&quot;/.test(bad.text),
+    );
+    check(
+      "the problems banner is a live region",
+      /id="mandate-problems"[^>]*role="alert"|role="alert"[^>]*id="mandate-problems"/.test(
+        bad.text,
+      ),
+    );
+    check(
+      "exactly one field is marked invalid, and it is the offending one",
+      (bad.text.match(/aria-invalid="true"/g) ?? []).length === 1 &&
+        /id="maxSlippageBps"[^>]*aria-invalid="true"/.test(bad.text),
+    );
+    check(
+      "the invalid field still points at its hint as well as the error",
+      /id="maxSlippageBps"[^>]*aria-describedby="maxSlippageBps-hint mandate-problems"/.test(
+        bad.text,
+      ),
+    );
+
+    // Every aria-describedby target must exist, or a screen reader announces nothing.
+    const ids = new Set([...bad.text.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    const refs = [...bad.text.matchAll(/aria-describedby="([^"]+)"/g)].flatMap((m) =>
+      (m[1] ?? "").split(" "),
+    );
+    check(
+      "no aria-describedby reference dangles",
+      refs.length > 0 && refs.every((ref) => ids.has(ref)),
+      `${refs.filter((r) => !ids.has(r)).join(", ")}`,
+    );
+
+    // A valid submission must still evaluate: the guard has to refuse bad input
+    // without also blocking good input.
+    const good = await postForm(uiBase, "/evaluate", { category: "rebalancing" });
+    check(
+      "a valid submission still reaches the comparison",
+      good.status === 200 && good.text.includes("Comparison"),
+      `status ${good.status}`,
+    );
+      check(
+        "a valid submission marks nothing invalid",
+        !good.text.includes('aria-invalid="true"'),
+      );
+    });
+  });
+
   // ── report ─────────────────────────────────────────────────────────────────
   process.stdout.write(`\n${passed}/${passed + failures.length} checks passed\n`);
   if (failures.length > 0) {

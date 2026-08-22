@@ -57,6 +57,8 @@ export function renderMandateForm(input: {
   readonly fixturesAvailable: boolean;
   readonly fixtureWarning?: string;
   readonly problems?: readonly string[];
+  /** Field names to mark `aria-invalid`. See `renderField`. */
+  readonly invalidFields?: readonly string[];
   readonly notice?: string;
   /** Core's category policy, derived via GET /v1/categories. */
   readonly categoryOptions: readonly CategoryOption[];
@@ -71,7 +73,7 @@ export function renderMandateForm(input: {
     ${input.notice === undefined ? null : html`<div class="banner info" role="status">${input.notice}</div>`}
     ${(input.problems ?? []).length === 0
       ? null
-      : html`<div class="banner bad" role="alert">
+      : html`<div id="mandate-problems" class="banner bad" role="alert">
           <strong>The mandate was not submitted as typed.</strong>
           <ul class="plain">
             ${(input.problems ?? []).map((problem) => html`<li>${problem}</li>`)}
@@ -118,7 +120,9 @@ export function renderMandateForm(input: {
               )}
             </select>
           </div>
-          ${MANDATE_FIELDS.map((field) => renderField(field, input.mandate))}
+          ${MANDATE_FIELDS.map((field) =>
+            renderField(field, input.mandate, input.invalidFields ?? []),
+          )}
         </div>
       </div>
 
@@ -174,6 +178,7 @@ export function renderMandateForm(input: {
           id="rawMandate"
           name="rawMandate"
           spellcheck="false"
+          ${raw((input.invalidFields ?? []).includes("rawMandate") ? 'aria-invalid="true"' : "")}
           aria-describedby="rawMandate-hint"
           placeholder="${"Leave empty to use the fields above"}"
         ></textarea>
@@ -204,8 +209,20 @@ export function renderMandateForm(input: {
  * that tells them what to type. Nine of these fields carry a unit or a
  * consequence in the hint, so the association is load-bearing, not decorative.
  */
-function renderField(field: MandateField, mandate: unknown): Html {
+function renderField(
+  field: MandateField,
+  mandate: unknown,
+  invalidFields: readonly string[] = [],
+): Html {
   const hintId = `${field.name}-hint`;
+  const invalid = invalidFields.includes(field.name);
+  // The description keeps pointing at the hint AS WELL AS the error list. Replacing
+  // the hint with the error would remove "USD micros" at exactly the moment someone
+  // is trying to correct the value, which is the wrong trade.
+  const describedBy = [
+    field.hint === undefined ? undefined : hintId,
+    invalid ? "mandate-problems" : undefined,
+  ].filter((value): value is string => value !== undefined);
   return html`<div>
     <label for="${field.name}">${field.label}</label>
     <input
@@ -213,7 +230,8 @@ function renderField(field: MandateField, mandate: unknown): Html {
       name="${field.name}"
       value="${fieldValue(mandate, field)}"
       spellcheck="false"
-      ${raw(field.hint === undefined ? "" : `aria-describedby="${hintId}"`)}
+      ${raw(invalid ? 'aria-invalid="true"' : "")}
+      ${raw(describedBy.length === 0 ? "" : `aria-describedby="${describedBy.join(" ")}"`)}
       ${raw(field.kind === "integer" ? 'inputmode="numeric"' : "")}
     />
     ${field.hint === undefined

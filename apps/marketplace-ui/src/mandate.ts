@@ -198,6 +198,16 @@ export interface MandateBuildResult {
   readonly mandate: unknown;
   /** Problems with the submitted values, reported rather than silently coerced. */
   readonly problems: readonly string[];
+  /**
+   * Field names whose submitted value was rejected, for `aria-invalid`.
+   *
+   * Carried alongside `problems` rather than replacing it with a keyed structure:
+   * the messages are prose meant to be read as one list, and they stay that way.
+   * This is the machine-readable half, needed to mark the offending input itself.
+   * Only genuinely invalid fields appear -- `aria-invalid="false"` on every healthy
+   * input is noise that some screen readers announce.
+   */
+  readonly invalidFields: readonly string[];
   /** True when the raw JSON escape hatch supplied the mandate wholesale. */
   readonly fromRawJson: boolean;
 }
@@ -258,11 +268,13 @@ export function buildMandate(
   const raw = (form.rawMandate ?? "").trim();
   if (raw.length > 0) {
     try {
-      return { mandate: JSON.parse(raw), problems: [], fromRawJson: true };
+      return { mandate: JSON.parse(raw), problems: [], invalidFields: [], fromRawJson: true };
     } catch (cause) {
       return {
         mandate: clone(base),
         problems: [`the raw mandate JSON did not parse: ${(cause as Error).message}`],
+        // The escape hatch is the offending control here, not any scalar field.
+        invalidFields: ["rawMandate"],
         fromRawJson: false,
       };
     }
@@ -270,6 +282,7 @@ export function buildMandate(
 
   const mandate = clone(base) as Record<string, unknown>;
   const problems: string[] = [];
+  const invalidFields: string[] = [];
 
   const category = form.category;
   if (category !== undefined && category.length > 0) {
@@ -296,11 +309,13 @@ export function buildMandate(
     if (field.kind === "integer") {
       if (!/^\d+$/.test(trimmed)) {
         problems.push(`${field.label} must be a whole number, received "${trimmed}"`);
+        invalidFields.push(field.name);
         continue;
       }
       const parsed = Number(trimmed);
       if (!Number.isSafeInteger(parsed)) {
         problems.push(`${field.label} is too large to be represented exactly`);
+        invalidFields.push(field.name);
         continue;
       }
       setPath(mandate, field.path, parsed);
@@ -313,6 +328,7 @@ export function buildMandate(
       // values without any visible sign that it happened.
       if (!/^\d+$/.test(trimmed)) {
         problems.push(`${field.label} must be a non-negative integer, received "${trimmed}"`);
+        invalidFields.push(field.name);
         continue;
       }
       setPath(mandate, field.path, trimmed);
@@ -326,6 +342,7 @@ export function buildMandate(
         .filter((part) => part.length > 0);
       if (parts.length === 0) {
         problems.push(`${field.label} cannot be empty`);
+        invalidFields.push(field.name);
         continue;
       }
       setPath(mandate, field.path, parts);
@@ -335,5 +352,5 @@ export function buildMandate(
     setPath(mandate, field.path, trimmed);
   }
 
-  return { mandate, problems, fromRawJson: false };
+  return { mandate, problems, invalidFields, fromRawJson: false };
 }
