@@ -361,6 +361,26 @@ strong { font-weight: 640; }
   box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
+/* Visually hidden, but still announced. Used for the raw-mandate textarea's label,
+ * whose purpose a sighted user reads from the surrounding prose.
+ *
+ * Deliberately NOT display:none or visibility:hidden — both remove the element
+ * from the accessibility tree as well as the page, which would leave the control
+ * nameless again and defeat the point. The clip-path approach keeps it in the tree.
+ * white-space:nowrap prevents a one-pixel box from wrapping the text into a tall
+ * sliver that some browsers then expose to layout. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Double-bezel. The element itself is the outer shell — a tray, one step darker
  * than the plate it holds — and ::before is the inner core, inset by exactly the
  * bezel gap with a radius of (shell - gap) so the two curves stay concentric. A

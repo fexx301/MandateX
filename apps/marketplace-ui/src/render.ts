@@ -160,13 +160,23 @@ export function renderMandateForm(input: {
         <summary class="soft" style="cursor:pointer;font-size:13px">
           Advanced: submit a raw mandate JSON instead
         </summary>
-        <p class="soft" style="font-size:12.5px;margin-top:10px">
+        <p id="rawMandate-hint" class="soft" style="font-size:12.5px;margin-top:10px">
           Overrides every field above. The base mandate below is the one the API's fixture
           bundle ships, whose timestamps are consistent with the frozen fixture clock.
         </p>
-        <textarea name="rawMandate" spellcheck="false" placeholder="${
-          "Leave empty to use the fields above"
-        }"></textarea>
+        <!-- The label is visually hidden rather than absent. Sighted users get the
+             field's purpose from the summary and paragraph above it; a screen reader
+             reaching this control by tab order gets neither, and would hear only
+             "edit text, blank". A control with no accessible name is a WCAG 4.1.2
+             failure, and this is the one field that rewrites the entire mandate. -->
+        <label for="rawMandate" class="sr-only">Raw mandate JSON</label>
+        <textarea
+          id="rawMandate"
+          name="rawMandate"
+          spellcheck="false"
+          aria-describedby="rawMandate-hint"
+          placeholder="${"Leave empty to use the fields above"}"
+        ></textarea>
       </details>
 
       <div class="row">
@@ -184,7 +194,18 @@ export function renderMandateForm(input: {
   `;
 }
 
+/**
+ * One editable mandate field.
+ *
+ * The hint is wired to the input with `aria-describedby` rather than merely
+ * sitting next to it. Visually the association is obvious from proximity; to a
+ * screen reader an unassociated `<div>` is unrelated content, so a user would
+ * hear "Max agent fee, edit text" and never hear "USD micros" — which is the part
+ * that tells them what to type. Nine of these fields carry a unit or a
+ * consequence in the hint, so the association is load-bearing, not decorative.
+ */
 function renderField(field: MandateField, mandate: unknown): Html {
+  const hintId = `${field.name}-hint`;
   return html`<div>
     <label for="${field.name}">${field.label}</label>
     <input
@@ -192,11 +213,14 @@ function renderField(field: MandateField, mandate: unknown): Html {
       name="${field.name}"
       value="${fieldValue(mandate, field)}"
       spellcheck="false"
+      ${raw(field.hint === undefined ? "" : `aria-describedby="${hintId}"`)}
       ${raw(field.kind === "integer" ? 'inputmode="numeric"' : "")}
     />
     ${field.hint === undefined
       ? null
-      : html`<div class="faint" style="font-size:11.5px;margin-top:2px">${field.hint}</div>`}
+      : html`<div id="${hintId}" class="faint" style="font-size:11.5px;margin-top:2px">
+          ${field.hint}
+        </div>`}
   </div>`;
 }
 
